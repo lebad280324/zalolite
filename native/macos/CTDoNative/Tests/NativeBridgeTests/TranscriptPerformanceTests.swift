@@ -3,10 +3,20 @@ import XCTest
 
 final class TranscriptPerformanceTests: XCTestCase {
     private func fixture(_ count:Int) throws -> [MessageSnapshot] {
-        let rows=(0..<count).map { i -> [String:Any] in
-            ["id":"message-\(i)","text":"Synthetic example \(i)","sender_id":"user-\(i/3)","sender_name":"Example",
-             "timestamp":1_790_000_000_000+Int64(i)*1000,"is_outgoing":i%2==0,
-             "image_url":i%2==0 ? "https://example.invalid/image.png" : NSNull()]
+        var rows: [[String: Any]] = []
+        for i in 0..<count {
+            let timestamp: Int64 = 1_790_000_000_000 + Int64(i) * 1000
+            let imageURL: Any = i % 2 == 0 ? "https://example.invalid/image.png" : NSNull()
+            let row: [String: Any] = [
+                "id": "message-\(i)",
+                "text": "Synthetic example \(i)",
+                "sender_id": "user-\(i / 3)",
+                "sender_name": "Example",
+                "timestamp": timestamp,
+                "is_outgoing": i % 2 == 0,
+                "image_url": imageURL
+            ]
+            rows.append(row)
         }
         return try JSONDecoder().decode([MessageSnapshot].self,from:JSONSerialization.data(withJSONObject:rows))
     }
