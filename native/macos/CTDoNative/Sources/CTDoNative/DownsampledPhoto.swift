@@ -47,7 +47,8 @@ private actor PhotoSlots {
      // A copy imported from a Zalo export: read it straight from disk (JPEG XL decodes natively).
      data=(try? Data(contentsOf:url,options:.mappedIfSafe)) ?? Data()
     }
-    for (attempt,delay) in (url.isFileURL ? [] : [0.0,1.5,4,10]).enumerated() {
+    let delays: [Double] = url.isFileURL ? [] : [0.0, 1.5, 4, 10]
+    for (attempt,delay) in delays.enumerated() {
      if attempt>0{try? await Task.sleep(nanoseconds:UInt64(delay*1_000_000_000))}
      await PhotoSlots.shared.acquire()
      do {data=try await ImageTransfer.fetch(url)} catch {lastError=error;data=Data()}
