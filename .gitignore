@@ -94,3 +94,6 @@ Thumbs.db
 # Private development evidence and local agent state
 /output/
 /.serena/
+
+# Also ignore a locally shared target-cache symlink.
+/target

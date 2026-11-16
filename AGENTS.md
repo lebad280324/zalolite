@@ -4,9 +4,9 @@ Operating guide for AI agents and humans working in this repository.
 
 ## Project
 
-`ctdozlite` (`zalo-rust`) is a native Zalo desktop client written in Rust: `egui` GUI, `ratatui` TUI, a Tokio worker for network I/O, and a local SQLite message store. No Node.js, no Electron, no Chromium.
+`Zalolite` is a native macOS Zalo client using SwiftUI/AppKit and a private Rust worker. The inherited `ctdozlite` crate also retains egui/TUI code. Preserve upstream notices in LICENSE-MIT, LICENSE-APACHE, NOTICE and THIRD_PARTY_NOTICES.md.
 
-- Repository: <https://github.com/ctdoteam1110/ctdozlite>
+- Repository: <https://github.com/lebad280324/zalolite>
 - Rust 1.75+ / edition 2021
 - Product docs are Vietnamese (`docs/`, `README.md`); engineering standards are English (`docs/standards/`)
 
@@ -14,8 +14,10 @@ Operating guide for AI agents and humans working in this repository.
 
 | Task | Command |
 | :--- | :--- |
+| Package native macOS | `bash packaging/package-native-macos.sh` |
+| Test Swift | `swift test --build-system native --package-path native/macos/CTDoNative --scratch-path target/swift-native --configuration release --disable-sandbox` |
 | Build (debug) | `cargo build --locked` |
-| Build (release binary) | `cargo build --release --locked --bin zalo-rust` |
+| Build (release binary) | `cargo build --release --locked --bin ctdozlite-core` |
 | Test | `cargo test --locked` |
 | Format | `cargo fmt --all` |
 | Lint | `cargo clippy --all-targets -- -D warnings` |

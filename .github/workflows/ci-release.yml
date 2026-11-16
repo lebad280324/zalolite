@@ -2,8 +2,10 @@ name: Zalolite native macOS
 
 on:
   push:
-    branches: [codex/release-native-0.0.10]
+    branches: [main]
     tags: ["v*"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +19,7 @@ jobs:
   native:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -34,7 +36,7 @@ jobs:
           python3 tests/native_worker_ownership.py dist/Zalolite.app/Contents/Helpers/ctdozlite-core
       - name: Archive application
         run: ditto -c -k --sequesterRsrc --keepParent dist/Zalolite.app dist/Zalolite-macos-arm64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: Zalolite-macos-arm64
           path: dist/Zalolite-macos-arm64.zip

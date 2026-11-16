@@ -2,10 +2,10 @@
 name = "ctdozlite"
 version = "0.0.10"
 edition = "2021"
-authors = ["TIPC1110 <tienichpc1110@gmail.com>"]
-description = "Lightweight, high-performance native Zalo PC client written in Rust (zero Node.js, zero Electron)"
-homepage = "https://ctdozlite.ctdo.net/"
-repository = "https://github.com/ctdoteam1110/ctdozlite"
+authors = ["lebad280324", "TIPC1110 <tienichpc1110@gmail.com>"]
+description = "Zalolite: native macOS Zalo client with SwiftUI/AppKit and a Rust worker"
+homepage = "https://github.com/lebad280324/zalolite"
+repository = "https://github.com/lebad280324/zalolite"
 license = "MIT OR Apache-2.0"
 default-run = "ctdozlite"
 
