@@ -130,7 +130,7 @@ struct UpdateRelease: Equatable {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard status == 200 else { throw UpdateError(status == 404 ? "Chưa có bản phát hành nào." : "GitHub trả về lỗi \(status).") }
-                guard let release = UpdateRelease(json: data) else { throw UpdateError("Bản phát hành mới nhất chưa có gói cho Mac Apple Silicon.") }
+                guard let release = UpdateRelease(json: data) else { throw UpdateError("Bản phát hành mới nhất chưa có gói chạy được trên máy Mac này.") }
                 lastCheck = Date(); UserDefaults.standard.set(lastCheck, forKey: Self.lastCheckKey)
                 phase = UpdateRelease.isNewer(release.version, than: currentVersion) ? .available(release) : .upToDate
             } catch is CancellationError {

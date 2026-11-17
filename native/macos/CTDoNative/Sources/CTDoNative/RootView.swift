@@ -248,6 +248,8 @@ struct RootView: View {
             } else {
                 // New chat, views, filters and the account live in the menu bar (Tệp, Xem, Zalolite).
                 Spacer(minLength: 0)
+                // Appears only when GitHub Releases has a newer Zalolite.
+                UpdateToolbarButton()
                 // Shown once a second account is kept on this Mac.
                 if !store.demo, store.savedAccounts.contains(where: { $0.uin != store.session.uin }) { AccountSwitcherButton() }
                 roundControl("magnifyingglass", help: "Tìm liên hệ, số điện thoại và tin nhắn (⌘K)") {

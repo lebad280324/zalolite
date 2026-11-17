@@ -97,3 +97,132 @@ struct UpdateMenuItem: View {
         }
     }
 }
+
+/// Sidebar toolbar pill shown only while a newer release is known, being installed, or just failed to install.
+struct UpdateToolbarButton: View {
+    @ObservedObject private var updater = SoftwareUpdater.shared
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.openSettings) private var openSettings
+    @State private var open = false
+    /// Kept so an install error stays reachable from the toolbar instead of the button vanishing.
+    @State private var lastRelease: UpdateRelease?
+
+    var body: some View {
+        if let release = shownRelease {
+            Button { open.toggle() } label: {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { icon; Text(title).font(.system(size: 13, weight: .semibold)).monospacedDigit() }
+                        .padding(.horizontal, 12)
+                    icon.frame(width: 36)
+                }
+                .frame(height: 36).contentShape(Capsule())
+            }
+            .buttonStyle(.plain).foregroundStyle(failed ? Color.orange : Color.accentColor).nativeGlass(18)
+            .help(failed ? "Cài bản cập nhật \(release.version) chưa thành công" : "Có bản Zalolite \(release.version)")
+            .popover(isPresented: $open, arrowEdge: .bottom) { panel(release) }
+            .transition(.scale(scale: 0.8).combined(with: .opacity))
+            .onAppear { lastRelease = release }
+            .onChange(of: release) { _, value in lastRelease = value }
+        }
+    }
+
+    private var failed: Bool { if case .failed = updater.phase { return true }; return false }
+
+    private var shownRelease: UpdateRelease? {
+        switch updater.phase {
+        case .available(let release), .downloading(let release, _), .installing(let release), .manual(let release, _): return release
+        case .failed: return lastRelease
+        default: return nil
+        }
+    }
+
+    private var title: String {
+        switch updater.phase {
+        case .downloading(_, let fraction): return "\(Int(fraction * 100))%"
+        case .installing: return "Đang cài…"
+        case .failed: return "Lỗi cập nhật"
+        default: return "Cập nhật"
+        }
+    }
+
+    @ViewBuilder private var icon: some View {
+        switch updater.phase {
+        case .downloading(_, let fraction):
+            ProgressView(value: fraction).progressViewStyle(.circular).controlSize(.small)
+        case .installing:
+            ProgressView().controlSize(.small)
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 15, weight: .medium))
+        default:
+            Image(systemName: "arrow.down.circle.fill").font(.system(size: 16, weight: .medium))
+        }
+    }
+
+    private func panel(_ release: UpdateRelease) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Zalolite \(release.version)").font(.system(size: 15, weight: .semibold))
+                    Text(subtitle(release)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if !release.notes.isEmpty {
+                ScrollView {
+                    Text(notes(release.notes)).font(.callout).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                }
+                .frame(maxHeight: 200)
+            }
+            Divider()
+            actions(release)
+        }
+        .padding(16).frame(width: 340)
+    }
+
+    private func subtitle(_ release: UpdateRelease) -> String {
+        var text = "Bạn đang dùng \(updater.currentVersion)"
+        if release.archiveSize > 0 { text += ", gói tải \(ByteCountFormatter.string(fromByteCount: Int64(release.archiveSize), countStyle: .file))" }
+        return text
+    }
+
+    @ViewBuilder private func actions(_ release: UpdateRelease) -> some View {
+        switch updater.phase {
+        case .downloading(_, let fraction):
+            HStack(spacing: 10) {
+                ProgressView(value: fraction)
+                Text("\(Int(fraction * 100))%").monospacedDigit().font(.caption).foregroundStyle(.secondary)
+                Button("Hủy") { updater.cancel() }
+            }
+        case .installing:
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Đang kiểm tra và cài đặt. Zalolite sẽ tự mở lại.").font(.callout).foregroundStyle(.secondary) }
+        case .manual(_, let app):
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Đã tải và kiểm tra xong. Thoát Zalolite rồi kéo bản mới trong Finder vào thư mục Applications.").font(.callout).foregroundStyle(.secondary)
+                Button("Hiện trong Finder") { NSWorkspace.shared.activateFileViewerSelecting([app]) }
+            }
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Label(message, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange)
+                HStack { details; Spacer(); Button("Thử lại") { updater.install(release) }.buttonStyle(.borderedProminent) }
+            }
+        default:
+            HStack {
+                details
+                Spacer()
+                Button("Để sau") { open = false }
+                Button("Tải và cài đặt") { updater.install(release) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private var details: some View {
+        Button("Chi tiết…") {
+            open = false; store.requestedSettingsPage = "updates"; NSApp.activate(ignoringOtherApps: true); openSettings()
+        }
+        .buttonStyle(.link)
+    }
+
+    private func notes(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+}
