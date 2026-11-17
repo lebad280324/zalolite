@@ -10,7 +10,7 @@ Giao diện SwiftUI/AppKit với Liquid Glass, lõi Rust xử lý mạng và d�
 Không Electron, không Chromium, không Node.js.
 
 [![Phiên bản](https://img.shields.io/github/v/release/lebad280324/zalolite?label=phi%C3%AAn%20b%E1%BA%A3n&color=0068ff)](https://github.com/lebad280324/zalolite/releases/latest)
-[![Nền tảng](https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-111?logo=apple)](#cài-đặt)
+[![Nền tảng](https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon%20%26%20Intel-111?logo=apple)](#cài-đặt)
 [![Giấy phép](https://img.shields.io/badge/gi%E1%BA%A5y%20ph%C3%A9p-MIT%20%2F%20Apache--2.0-2ea44f)](#giấy-phép-và-ghi-nhận)
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-AppKit-F05138?logo=swift&logoColor=white)](native/macos/CTDoNative)
 [![Rust](https://img.shields.io/badge/Rust-core-000?logo=rust)](src)
@@ -35,7 +35,7 @@ Không Electron, không Chromium, không Node.js.
 
 | | |
 | :--- | :--- |
-| 🪶 **Nhẹ** | Bộ cài khoảng 13 MB. Giao diện native của macOS và một worker Rust, không kèm trình duyệt nhúng. |
+| 🪶 **Nhẹ** | Bộ cài khoảng 27 MB, chạy cả Apple Silicon lẫn Intel. Giao diện native của macOS và một worker Rust, không kèm trình duyệt nhúng. |
 | ⚡ **Mượt** | Tin nhắn vẽ bằng AppKit/CoreText, lịch sử phân trang, cache ảnh; cuộn và đổi kích thước cửa sổ nhẹ nhàng. |
 | 🍎 **Đúng chất Mac** | Liquid Glass trên macOS 26, chế độ sáng/tối, thông báo hệ thống, huy hiệu Dock, thanh menu. |
 | 🔒 **Riêng tư** | Session, khóa và lịch sử chỉ nằm trên máy bạn. Không máy chủ trung gian, không thu thập dữ liệu. |
@@ -48,7 +48,7 @@ So sánh với Zalo PC 26.11.10 cho macOS, đo trên cùng một máy Apple Sili
 | | Zalolite | Zalo PC |
 | :--- | :--- | :--- |
 | Công nghệ | SwiftUI/AppKit native + lõi Rust | Electron (Chromium + Node.js) |
-| Dung lượng sau cài đặt | **≈ 35 MB** (bộ cài ≈ 13 MB) | ≈ 766 MB |
+| Dung lượng sau cài đặt | **≈ 67 MB** (bộ cài ≈ 27 MB) | ≈ 766 MB |
 | Giao diện | Liquid Glass của macOS 26, theo chế độ sáng/tối của hệ thống | Giao diện web dùng chung cho Windows và macOS |
 | Mở hội thoại ẩn | **Touch ID** hoặc mật khẩu máy | Mã PIN riêng |
 
@@ -100,14 +100,15 @@ So sánh với Zalo PC 26.11.10 cho macOS, đo trên cùng một máy Apple Sili
 
 > [!NOTE]
 > Các chức năng có kiểm thử tự động bằng dữ liệu mẫu, nhưng chưa phải luồng nào cũng đã thử với tài khoản Zalo thật
-> (ví dụ cuộc gọi video). Xem [phạm vi chức năng](docs/BA_FEATURE_COVERAGE.md) và [ghi chú phát hành](docs/releases/v0.0.10.md)
+> (ví dụ cuộc gọi video). Xem [phạm vi chức năng](docs/BA_FEATURE_COVERAGE.md) và [ghi chú phát hành](docs/releases/v0.0.12.md)
 > để biết giới hạn hiện tại.
 
 ## Cài đặt
 
-**Yêu cầu:** Mac Apple Silicon (M1 trở lên), macOS 14 Sonoma trở lên. Hiệu ứng Liquid Glass cần macOS 26 trở lên.
+**Yêu cầu:** macOS 14 Sonoma trở lên, trên Mac Apple Silicon (M1 trở lên) hoặc Mac Intel. Một gói Universal chạy
+trên cả hai loại chip, không cần chọn bản. Hiệu ứng Liquid Glass cần macOS 26 trở lên.
 
-1. Tải `Zalolite-<phiên-bản>-macos-arm64.dmg` ở trang [Releases](https://github.com/lebad280324/zalolite/releases/latest).
+1. Tải `Zalolite-<phiên-bản>-macos-universal.dmg` ở trang [Releases](https://github.com/lebad280324/zalolite/releases/latest).
 2. Mở DMG, kéo **Zalolite.app** vào **Applications**. Nếu đang có bản cũ, thoát nó trước khi thay.
 3. Mở Zalolite và quét mã QR bằng ứng dụng Zalo trên điện thoại.
 
@@ -119,7 +120,7 @@ So sánh với Zalo PC 26.11.10 cho macOS, đo trên cùng một máy Apple Sili
 Ứng dụng hiện được ký ad-hoc, chưa được Apple notarize. Trước hết, đối chiếu checksum với `SHA256SUMS.txt` của bản phát hành:
 
 ```sh
-shasum -a 256 ~/Downloads/Zalolite-*-macos-arm64.dmg
+shasum -a 256 ~/Downloads/Zalolite-*-macos-universal.dmg
 ```
 
 Sau đó vào **System Settings → Privacy & Security**, kéo xuống và chọn **Open Anyway**. Chỉ cần làm một lần.
