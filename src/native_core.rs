@@ -1269,32 +1269,43 @@ impl Core {
         Ok(json!({"threads": self.threads.len()}))
     }
 
-    /// Loads the account data key needed to open a Zalo PC export.
+    /// Makes sure the stored account data key opens the selected Zalo PC export.
     ///
-    /// Sessions saved by older builds lack it, so it is read once from the
-    /// existing `getLoginInfo` request and persisted with the session.
+    /// Zalo PC encrypts exports with the `dkey` that `getLoginInfo` returns to a PC client
+    /// (type 23); a web-type request returns a different key (re-notes/71). The stored key is
+    /// checked against the export's first tar header; when it does not open the file, the PC
+    /// key is requested, verified the same way, and persisted with the session (secret).
     async fn ensure_export_key(&mut self, path: &str) -> Result<()> {
-        if crate::zalo_backup::ContainerVersion::from_path(Path::new(path)).is_none()
-            || self.session.login.as_ref().is_some_and(|login| !login.dkey.is_empty())
-        {
+        if crate::zalo_backup::ContainerVersion::from_path(Path::new(path)).is_none() {
             return Ok(());
         }
-        // A PC export may use its own account-matched key even when this
-        // native session has not fetched a dkey or is temporarily offline.
-        if let Some(login)=&self.session.login {
-            let own_uid=login.uin.clone();let source=path.to_owned();
-            if tokio::task::spawn_blocking(move || crate::zalo_backup::resolve_export_key(Path::new(&source),"",&own_uid).is_ok()).await? { return Ok(()); }
+        let Some(login) = self.session.login.clone() else { return Ok(()) };
+        if export_key_opens(path, &login.dkey, &login.uin).await? {
+            return Ok(());
         }
-        let info = crate::login::get_login_info(&self.session)
-            .await
-            .map_err(|_| UserError("Chưa lấy được khóa dữ liệu của tài khoản. Kiểm tra kết nối rồi thử lại."))?;
-        let key = info
-            .get("data")
-            .and_then(|data| data.get("dkey"))
-            .and_then(Value::as_str)
-            .filter(|key| !key.is_empty())
-            .ok_or(UserError("Zalo không trả về khóa dữ liệu. Hãy đăng xuất, đăng nhập lại rồi thử nhập."))?
-            .to_owned();
+        let mut fetched = None;
+        for zpw_type in [crate::session::ZPW_PC_TYPE, crate::session::ZPW_TYPE] {
+            let Ok(info) = crate::login::get_login_info_as(&self.session, zpw_type, crate::session::ZPW_VER).await else { continue };
+            let key = info
+                .get("data")
+                .unwrap_or(&info)
+                .get("dkey")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            if key.is_empty() {
+                continue;
+            }
+            if export_key_opens(path, &key, &login.uin).await? {
+                fetched = Some(key);
+                break;
+            }
+        }
+        let Some(key) = fetched else {
+            bail!(UserError(
+                "Không mở được tệp sao lưu bằng khóa của tài khoản đang đăng nhập. Hãy chắc tệp được xuất từ chính tài khoản này trong Zalo PC và đã xuất xong, rồi thử lại."
+            ));
+        };
         if let Some(login) = self.session.login.as_mut() {
             login.dkey = key;
         }
@@ -2533,6 +2544,12 @@ pub async fn run_stdio(demo: bool) -> Result<()> {
         .join()
         .map_err(|_| anyhow!("native output thread failed"))??;
     Ok(())
+}
+
+/// True when `key` (or a matching key Zalo PC left on this Mac) opens the export's first tar header.
+async fn export_key_opens(path: &str, key: &str, own_uid: &str) -> Result<bool> {
+    let (source, key, uid) = (path.to_owned(), key.to_owned(), own_uid.to_owned());
+    Ok(tokio::task::spawn_blocking(move || crate::zalo_backup::resolve_export_key(Path::new(&source), &key, &uid).is_ok()).await?)
 }
 
 #[cfg(test)]

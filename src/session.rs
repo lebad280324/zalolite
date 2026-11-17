@@ -16,6 +16,9 @@ use crate::crypto;
 
 pub const ZPW_VER: &str = "694";
 pub const ZPW_TYPE: &str = "30";
+/// Client type Zalo PC (macOS) declares. `getLoginInfo` returns the account's PC data key
+/// (`dkey`) only for this type, and Zalo PC encrypts its exports with that key (re-notes/71).
+pub const ZPW_PC_TYPE: &str = "23";
 pub const CONFIG_DOMAIN: &str = "zaloapp.com";
 
 

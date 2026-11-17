@@ -114,8 +114,9 @@ fn derive_key_iv(data_key: &str, version: ContainerVersion) -> Result<([u8; 32],
     }
 }
 
-/// Select a key only after its first tar header validates. The PC export key
-/// can differ from the native web-session dkey even for the same account.
+/// Select a key only after its first tar header validates. The PC export key is the
+/// `dkey` returned to a PC-type `getLoginInfo` (re-notes/71); a key Zalo PC left in its
+/// Local Storage on this Mac is the fallback.
 #[cfg_attr(any(test, not(target_os = "macos")), allow(unused_variables))]
 pub(crate) fn resolve_export_key(path: &Path, data_key: &str, own_uid: &str) -> Result<String> {
     let version = ContainerVersion::from_path(path)
@@ -143,7 +144,7 @@ pub(crate) fn resolve_export_key(path: &Path, data_key: &str, own_uid: &str) -> 
             }
         }
     }
-    Err(BackupError("Chưa tìm được khóa xuất dữ liệu phù hợp. Khóa của Zalo PC có thể khác phiên Native; hãy giữ Zalo PC đã xuất tệp trên máy và đăng nhập đúng tài khoản rồi thử lại. Tệp cũng có thể chưa xuất hoàn tất.").into())
+    Err(BackupError("Không mở được tệp sao lưu bằng khóa của tài khoản đang đăng nhập. Hãy chắc tệp được xuất từ chính tài khoản này trong Zalo PC và đã xuất xong, rồi thử lại.").into())
 }
 
 /// Sequential plaintext view of the CBC stream that can jump over file bodies.

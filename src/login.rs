@@ -221,16 +221,12 @@ fn flatten_query(v: &Value) -> String {
 
 /// `GET /api/login/getLoginInfo` — returns session keys (dkey, zpw_enk, endpoints).
 pub async fn get_login_info(s: &Session) -> Result<Value> {
-    let client_time = unix_now();
-    let payload = obj(&[
-        ("imei", json!(s.imei)),
-        ("computer_name", json!(s.computer_name)),
-        ("language", json!("vi")),
-        ("ts", json!(client_time)),
-    ]);
-    let cipher = ParamCipher::new(ZPW_TYPE, &s.imei, client_time)?;
-    let body = cipher.build_body(ZPW_TYPE, ZPW_VER, &payload, "getlogininfo")?;
-    let query = flatten_query(&body);
+    get_login_info_as(s, ZPW_TYPE, ZPW_VER).await
+}
+
+/// [`get_login_info`] declaring an explicit client `type` and `client_version`.
+pub async fn get_login_info_as(s: &Session, zpw_type: &str, zpw_ver: &str) -> Result<Value> {
+    let (cipher, query) = login_info_request(&s.imei, &s.computer_name, zpw_type, zpw_ver, unix_now())?;
 
     // Try both auth host (wpa.zaloapp.com, where PC session cookies live)
     // and wpa_chat (wpa.chat.zalo.me, where web session cookies live).
@@ -253,6 +249,19 @@ pub async fn get_login_info(s: &Session) -> Result<Value> {
         }
     }
     Err(last_err)
+}
+
+/// Signed `getLoginInfo` query for one client type; the cipher also decrypts the response.
+fn login_info_request(imei: &str, computer_name: &str, zpw_type: &str, zpw_ver: &str, client_time: i64) -> Result<(ParamCipher, String)> {
+    let payload = obj(&[
+        ("imei", json!(imei)),
+        ("computer_name", json!(computer_name)),
+        ("language", json!("vi")),
+        ("ts", json!(client_time)),
+    ]);
+    let cipher = ParamCipher::new(zpw_type, imei, client_time)?;
+    let body = cipher.build_body(zpw_type, zpw_ver, &payload, "getlogininfo")?;
+    Ok((cipher, flatten_query(&body)))
 }
 
 /// Pull `dkey` / `zpw_enk` / domains out of a login response payload.
@@ -406,5 +415,19 @@ mod tests {
         assert_eq!(s.zpw_sek.as_deref(), Some("sek_nested_456"));
         let login = s.login.as_ref().unwrap();
         assert_eq!(login.zpw_sek, "sek_nested_456");
+    }
+}
+
+#[cfg(test)]
+mod login_info_type_tests {
+    use super::*;
+
+    #[test]
+    fn login_info_declares_the_requested_client_type() {
+        let (_, pc) = login_info_request("imei-1", "Mac", crate::session::ZPW_PC_TYPE, ZPW_VER, 1_700_000_000_000).unwrap();
+        assert!(pc.split('&').any(|p| p == "type=23"), "{pc}");
+        assert!(pc.split('&').any(|p| p.starts_with("signkey=")));
+        let (_, web) = login_info_request("imei-1", "Mac", ZPW_TYPE, ZPW_VER, 1_700_000_000_000).unwrap();
+        assert!(web.split('&').any(|p| p == "type=30"));
     }
 }
