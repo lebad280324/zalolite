@@ -17,12 +17,15 @@ struct CTDoNativeApp: App {
                 .environmentObject(store)
                 .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
                 .frame(minWidth: 760, minHeight: 540)
-                .task { delegate.store = store; store.start(); await exportDemoSnapshotIfRequested(store); await runTranscriptFrameProbeIfRequested(store) }
+                .task { delegate.store = store; store.start(); SoftwareUpdater.shared.checkIfDue(); await exportDemoSnapshotIfRequested(store); await runTranscriptFrameProbeIfRequested(store) }
         }
         .defaultSize(width: 1_180, height: 760)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             SidebarCommands()
+            CommandGroup(after: .appInfo) {
+                UpdateMenuItem { openSettingsPage("updates") }
+            }
             CommandGroup(after: .appSettings) {
                 Button("Thông tin tài khoản…") { store.showingAccountInfo = true }.disabled(!store.session.loggedIn)
                 Button("Dữ liệu và dung lượng…") { openSettingsPage("storage") }

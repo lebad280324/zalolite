@@ -4,16 +4,17 @@ import UniformTypeIdentifiers
 import NativeBridge
 
 private enum SettingsPage: String, CaseIterable, Identifiable {
- case general = "Chung", security = "Tài khoản & khóa", privacy = "Quyền riêng tư", sync = "Đồng bộ & sao lưu", storage = "Dung lượng", appearance = "Giao diện", notifications = "Thông báo", messages = "Tin nhắn", calls = "Cuộc gọi", utilities = "Tiện ích"
+ case general = "Chung", updates = "Cập nhật phần mềm", security = "Tài khoản & khóa", privacy = "Quyền riêng tư", sync = "Đồng bộ & sao lưu", storage = "Dung lượng", appearance = "Giao diện", notifications = "Thông báo", messages = "Tin nhắn", calls = "Cuộc gọi", utilities = "Tiện ích"
  var id: String { rawValue }
  /// Stable key used by deep links from the workspace.
  var key: String {
-  switch self { case .general: return "general"; case .security: return "security"; case .privacy: return "privacy"; case .sync: return "sync"; case .storage: return "storage"; case .appearance: return "appearance"; case .notifications: return "notifications"; case .messages: return "messages"; case .calls: return "calls"; case .utilities: return "utilities" }
+  switch self { case .general: return "general"; case .updates: return "updates"; case .security: return "security"; case .privacy: return "privacy"; case .sync: return "sync"; case .storage: return "storage"; case .appearance: return "appearance"; case .notifications: return "notifications"; case .messages: return "messages"; case .calls: return "calls"; case .utilities: return "utilities" }
  }
  /// Individual options on the page, so search finds a setting and not only a page title.
  var keywords: [String] {
   switch self {
   case .general: return ["Ngôn ngữ", "Mở khi đăng nhập macOS", "Ghi nhớ tài khoản", "Kết nối lại"]
+  case .updates: return ["Phiên bản", "Kiểm tra cập nhật", "Tự động kiểm tra", "Bản mới"]
   case .security: return ["Khóa ứng dụng", "Phím tắt khóa", "Bảo mật hai lớp", "Đăng xuất", "Mã PIN hội thoại ẩn"]
   case .privacy: return ["Ngày sinh", "Trạng thái truy cập", "Trạng thái đã xem", "Người được nhắn tin", "Người được gọi", "Danh sách chặn", "Tìm qua số điện thoại", "Nguồn kết bạn", "Đang soạn"]
   case .sync: return ["Đồng bộ từ điện thoại", "Xuất bản sao", "Nhập lịch sử", "Sao lưu"]
@@ -29,7 +30,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
  /// Tile colours follow the system settings palette so pages are recognisable at a glance.
  var tint: Color {
   switch self {
-  case .general: return .gray; case .security: return .blue; case .privacy: return .indigo; case .sync: return .green
+  case .general: return .gray; case .updates: return .blue; case .security: return .blue; case .privacy: return .indigo; case .sync: return .green
   case .storage: return Color(red: 0.45, green: 0.47, blue: 0.52); case .appearance: return .purple; case .notifications: return .red
   case .messages: return Color(red: 0.2, green: 0.78, blue: 0.35); case .calls: return .teal; case .utilities: return .orange
   }
@@ -37,6 +38,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
  var summary: String {
   switch self {
   case .general: return "Ngôn ngữ, khởi động và kết nối của ứng dụng."
+  case .updates: return "Phiên bản Zalolite và bản cập nhật mới."
   case .security: return "Khóa ứng dụng trên máy này và bảo mật tài khoản Zalo."
   case .privacy: return "Ai được xem thông tin và liên hệ với bạn."
   case .sync: return "Đồng bộ từ điện thoại, xuất và nhập bản sao lưu."
@@ -49,13 +51,14 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   }
  }
  var icon: String {
-  switch self { case .general: return "switch.2"; case .security: return "lock.shield"; case .privacy: return "hand.raised"; case .sync: return "arrow.triangle.2.circlepath"; case .storage: return "internaldrive"; case .appearance: return "paintpalette"; case .notifications: return "bell.badge"; case .messages: return "bubble.left"; case .calls: return "video"; case .utilities: return "slider.horizontal.3" }
+  switch self { case .general: return "switch.2"; case .updates: return "arrow.down.circle"; case .security: return "lock.shield"; case .privacy: return "hand.raised"; case .sync: return "arrow.triangle.2.circlepath"; case .storage: return "internaldrive"; case .appearance: return "paintpalette"; case .notifications: return "bell.badge"; case .messages: return "bubble.left"; case .calls: return "video"; case .utilities: return "slider.horizontal.3" }
  }
 }
 
 struct SettingsView: View {
  @EnvironmentObject private var store: AppStore
  @StateObject private var system = NativeSystem()
+ @ObservedObject private var updater = SoftwareUpdater.shared
  @State private var page = SettingsPage.general
  @State private var search = ""
  @State private var pendingKey: String?
@@ -118,6 +121,11 @@ struct SettingsView: View {
        Text(item.rawValue)
        if !search.isEmpty, let hit = item.match(search) { Text(verbatim: hit).font(.caption2).foregroundStyle(.secondary) }
       }
+      if item == .updates, updater.available != nil {
+       Spacer(minLength: 4)
+       Text("Mới").font(.caption2.weight(.bold)).foregroundStyle(.white)
+        .padding(.horizontal, 6).padding(.vertical, 2).background(Color.accentColor, in: Capsule())
+      }
      }.tag(item)
     }
    }
@@ -172,6 +180,8 @@ struct SettingsView: View {
    }
    Section("Khởi động") { Toggle("Mở khi đăng nhập macOS", isOn: Binding(get: { system.launchAtLogin }, set: { system.setLaunchAtLogin($0) })); Text("macOS có thể yêu cầu cho phép trong Mục đăng nhập.").font(.caption).foregroundStyle(.secondary) }
    Section("Kết nối") { LabeledContent("Trạng thái", value: store.connection); Button("Kết nối lại bộ xử lý") { store.restart() } }
+  case .updates:
+   SoftwareUpdateSection()
   case .security:
    Section("Tài khoản") {
     HStack(spacing: 14) {

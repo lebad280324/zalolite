@@ -207,3 +207,25 @@ xóa từng mục hoặc xóa tất cả. Chế độ demo không ghi lịch s�
 Chọn trả lời bằng menu, vuốt hoặc nhấp đúp sẽ đưa con trỏ vào ô soạn mà không
 xóa bản nháp hay thay vùng chọn. Yêu cầu focus chỉ xảy ra theo thao tác trả lời,
 không lặp lại ở mỗi lượt vẽ hoặc khi gõ ở nơi khác.
+
+## Cập nhật phần mềm
+
+**Cài đặt → Cập nhật phần mềm** (hoặc menu **Zalolite → Kiểm tra cập nhật…**) hỏi
+`https://api.github.com/repos/lebad280324/zalolite/releases/latest`. Bản mới chỉ xuất hiện khi có
+một GitHub Release (không phải bản nháp hay pre-release) với tag dạng `v0.0.11`, có tệp
+`Zalolite-<phiên-bản>-macos-arm64.zip` và `SHA256SUMS.txt`. Mỗi commit mới không tự thành bản cập nhật.
+
+Khi người dùng chọn **Tải và cài đặt**, ứng dụng:
+
+1. Tải `SHA256SUMS.txt` và gói ZIP từ `github.com` qua HTTPS.
+2. Đối chiếu SHA-256, giải nén bằng `ditto`, kiểm tra bundle ID, đúng số phiên bản và `codesign --verify --deep --strict`.
+3. Thoát; một script nhỏ chờ tiến trình kết thúc, thay `Zalolite.app` (khôi phục bản cũ nếu không thay được) rồi mở bản mới.
+
+Nếu thư mục chứa ứng dụng không cho ghi, gói đã kiểm tra được mở trong Finder để người dùng tự kéo vào
+Applications. Kiểm tra tự động chạy tối đa một lần mỗi ngày khi mở ứng dụng và có thể tắt; chế độ `--demo`
+không tự kiểm tra. Mã SHA-256 nằm cùng bản phát hành, nên chỉ chống tệp hỏng hoặc bị thay trên đường truyền,
+không thay được việc bảo vệ tài khoản GitHub phát hành.
+
+Phát hành bản mới: tăng `version` trong `Cargo.toml`, chạy `packaging/package-native-macos.sh`, rồi
+`packaging/make-native-release.sh` để tạo ZIP, DMG và `SHA256SUMS.txt` trong `dist/`. Script in sẵn lệnh
+`gh release create v<phiên-bản> …` để đăng Release lên `lebad280324/zalolite`.
