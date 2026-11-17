@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zalolite — Zalo native cho macOS</title>
+<meta name="description" content="Zalolite là ứng dụng Zalo viết native cho macOS: nhẹ hơn 11 lần so với Zalo PC, chạy trên Mac Apple Silicon và Intel, dữ liệu nằm trên máy bạn. Mã nguồn mở.">
+<meta property="og:title" content="Zalolite — Zalo native cho macOS">
+<meta property="og:description" content="Nhẹ, nhanh, đúng chất Mac. Một gói chạy trên cả Apple Silicon và Intel.">
+<meta property="og:image" content="assets/main.jpg">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0a5cf0">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Đến nội dung chính</a>
+
+<header class="wrap top">
+  <a class="brand" href="#"><img src="assets/icon.png" alt="" width="34" height="34">Zalolite</a>
+  <nav aria-label="Trang">
+    <a href="#tinh-nang">Tính năng</a>
+    <a href="#cai-dat">Cài đặt</a>
+    <a class="gh" href="https://github.com/lebad280324/zalolite">GitHub ↗</a>
+    <a class="nav-cta" href="#download">Tải cho Mac ↓</a>
+  </nav>
+</header>
+
+<main id="main">
+  <section class="wrap hero">
+    <div class="hero-grid">
+      <div>
+        <p class="platform"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg> Dành riêng cho macOS</p>
+        <h1><span>Zalo trên Mac,</span><span>gọn như ứng dụng</span><span>của Mac.</span></h1>
+        <p class="lede">Những cuộc trò chuyện quen thuộc, trong một giao diện đúng chất Mac. Nhỏ gọn, hỗ trợ nhiều tài khoản và lưu lịch sử ngay trên máy bạn.</p>
+      </div>
+      <div class="get">
+        <div class="get-heading"><img src="assets/icon.png" alt="" width="44" height="44"><div><strong>Zalolite cho macOS</strong><span>Miễn phí · Mã nguồn mở</span></div></div>
+        <a class="download" id="download" data-download href="https://github.com/lebad280324/zalolite/releases/download/v0.0.12/Zalolite-0.0.12-macos-universal.dmg">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          <span>Tải về cho macOS<small id="dl-file">Bộ cài Universal DMG · 26,5 MB</small></span>
+        </a>
+        <p class="meta"><span id="dl-version" aria-live="polite">Phiên bản 0.0.12</span><span>macOS 14 trở lên</span><span>Apple Silicon và Intel</span></p>
+        <a class="source" href="https://github.com/lebad280324/zalolite">Xem mã nguồn trên GitHub</a>
+      </div>
+    </div>
+    <figure class="shot-frame"><img class="shot-hero" fetchpriority="high" src="assets/main.jpg" width="1556" height="1011" alt="Cửa sổ Zalolite: danh sách hội thoại bên trái, cuộc trò chuyện với hình nền tự chọn bên phải"><figcaption>Giao diện thực tế trên macOS 26 với Liquid Glass và hình nền tùy chọn.</figcaption></figure>
+  </section>
+
+  <section class="wrap weight" aria-labelledby="weight-title">
+    <div><h2 id="weight-title">Gọn hơn.<br>Khoảng 11 lần.</h2>
+    <p class="note">Zalolite dùng SwiftUI, AppKit và lõi Rust thay cho một trình duyệt nhúng. Dung lượng sau cài đặt khoảng 67 MB, để dành chỗ cho những việc khác.</p></div>
+    <div>
+    <div class="bars" role="img" aria-label="Dung lượng sau cài đặt: Zalo PC khoảng 766 MB, Zalolite khoảng 67 MB">
+      <div class="bar-row">
+        <div class="bar-name">Zalo PC<small>Electron</small></div>
+        <div class="track"><div class="fill pc"><span class="value">766 MB</span></div></div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-name">Zalolite<small>SwiftUI và Rust</small></div>
+        <div class="track"><div class="fill lite"></div><span class="value lite-v">67 MB</span></div>
+      </div>
+    </div>
+    <p class="comparison-note">So sánh dung lượng sau cài đặt trên cùng một máy Mac với Zalo PC 26.11.10. Số liệu làm tròn; không phải phép đo RAM hay tốc độ.</p></div>
+  </section>
+
+  <div class="features-shell"><section class="wrap features" id="tinh-nang" aria-labelledby="features-title">
+    <div class="section-head"><h2 id="features-title">Quen với Zalo.<br>Hợp với Mac.</h2><p>Từ một cái chạm Touch ID đến cách bạn chuyển tài khoản, những chi tiết nhỏ làm nên trải nghiệm.</p></div>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/></svg></div>
+        <h3>Giao diện của chính macOS</h3>
+        <p>Liquid Glass trên macOS 26, tự theo chế độ sáng tối, thanh menu, thông báo hệ thống và số chưa đọc trên Dock.</p>
+      </div>
+      <div class="feature">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 11c0 3 0 5-1.5 8"/><path d="M8.5 8.5a5 5 0 0 1 8.5 3.5c0 2.5-.3 4.5-1 6.5"/><path d="M5.5 6A8.5 8.5 0 0 1 20.5 12c0 1.4-.1 2.7-.3 4"/><path d="M6 14c.6-1 1-2.3 1-4"/></svg></div>
+        <h3>Mở hội thoại ẩn bằng Touch ID</h3>
+        <p>Không cần nhớ thêm mã PIN riêng. Chạm vân tay hoặc nhập mật khẩu máy là xong.</p>
+      </div>
+      <div class="feature">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/></svg></div>
+        <h3>Nhiều tài khoản một cửa sổ</h3>
+        <p>Chuyển tài khoản ngay từ ảnh đại diện trên thanh công cụ. Dữ liệu từng tài khoản được tách riêng.</p>
+      </div>
+      <div class="feature">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg></div>
+        <h3>Hình nền cho từng cuộc trò chuyện</h3>
+        <p>Chọn màu có sẵn, ảnh đại diện làm mờ hoặc ảnh của bạn, kèm thanh làm dịu để chữ luôn dễ đọc.</p>
+      </div>
+      <div class="feature">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Dữ liệu ở lại trên máy bạn</h3>
+        <p>Phiên đăng nhập và lịch sử lưu trên Mac của bạn. Không máy chủ trung gian, không thu thập dữ liệu.</p>
+      </div>
+      <div class="feature">
+        <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></div>
+        <h3>Mang lịch sử theo, tự cập nhật</h3>
+        <p>Nhập bản sao lưu Zalo PC, đồng bộ tin từ điện thoại và kiểm tra bản cập nhật ngay trong ứng dụng.</p>
+      </div>
+    </div>
+  </section>
+
+  </div>
+  <section class="wrap gallery" aria-labelledby="gallery-title">
+    <div class="section-head"><h2 id="gallery-title">Nhìn gần hơn một chút.</h2><p>Giao diện thật. Tùy chỉnh theo cách bạn làm việc và trò chuyện.</p></div>
+    <div class="gallery-grid">
+      <figure>
+        <div class="gallery-image"><img src="assets/info.jpg" width="1556" height="1011" loading="lazy" alt="Bảng thông tin hội thoại và menu chuyển tài khoản"></div>
+        <figcaption><b>Thông tin hội thoại.</b> Tác vụ nhanh, nhắc hẹn, ảnh và video đã gửi; chuyển tài khoản ngay trên thanh công cụ.</figcaption>
+      </figure>
+      <figure>
+        <div class="gallery-image"><img src="assets/settings.jpg" width="1556" height="1011" loading="lazy" alt="Cài đặt giao diện với chế độ màu và hình nền cuộc trò chuyện"></div>
+        <figcaption><b>Giao diện.</b> Chế độ sáng tối và hình nền theo ý bạn.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="wrap install" id="cai-dat" aria-labelledby="install-title">
+    <div class="install-box">
+      <div>
+        <h2 id="install-title">Kéo thả.<br>Quét mã. Trò chuyện.</h2>
+        <ol class="steps">
+          <li><span><b>Tải bộ cài</b> bằng nút ở đầu trang. Một file chạy trên cả Mac Apple Silicon và Mac Intel.</span></li>
+          <li><span><b>Mở file DMG</b> rồi kéo Zalolite vào thư mục Applications.</span></li>
+          <li><span><b>Mở Zalolite</b> và quét mã QR bằng ứng dụng Zalo trên điện thoại.</span></li>
+        </ol>
+      </div>
+      <div class="aside">
+        <h3>macOS chặn lần mở đầu?</h3>
+        <p>Zalolite chưa được Apple notarize. Sau khi kiểm tra mã SHA-256 của bộ cài, vào <b>System Settings → Privacy &amp; Security → Open Anyway</b> để cho phép mở lần đầu.</p>
+        <h3>Muốn chắc file không bị thay đổi?</h3>
+        <p>So mã SHA-256 của file tải về với <code>SHA256SUMS.txt</code> trong trang <a href="https://github.com/lebad280324/zalolite/releases/latest">phát hành</a>.</p>
+        <h3>Yêu cầu</h3>
+        <p>macOS 14 Sonoma trở lên. Hiệu ứng Liquid Glass cần macOS 26.</p>
+      </div>
+    </div>
+  </section>
+  <section class="wrap bottom-download" aria-labelledby="ready-title">
+    <div><h2 id="ready-title">Để cuộc trò chuyện tiếp tục.</h2><p>Miễn phí, mã nguồn mở và dành riêng cho chiếc Mac của bạn.</p></div>
+    <a class="download" data-download href="https://github.com/lebad280324/zalolite/releases/download/v0.0.12/Zalolite-0.0.12-macos-universal.dmg">Tải Zalolite cho macOS <span aria-hidden="true">↓</span></a>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <p>Zalolite là dự án mã nguồn mở độc lập, không liên kết với Zalo hay VNG. Phát hành theo giấy phép MIT và Apache 2.0.</p>
+    <nav aria-label="Liên kết">
+      <a href="https://github.com/lebad280324/zalolite">Mã nguồn</a>
+      <a href="https://github.com/lebad280324/zalolite/releases">Các bản phát hành</a>
+      <a href="https://github.com/lebad280324/zalolite/issues">Báo lỗi</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="config.js" defer></script>
+<script src="download.js" defer></script>
+</body>
+</html>
