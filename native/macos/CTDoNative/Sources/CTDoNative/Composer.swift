@@ -21,7 +21,7 @@ struct NativeComposer: NSViewRepresentable {
         let bounds = ((text.isEmpty ? " " : text) as NSString).boundingRect(
             with: NSSize(width: max(20, width - 22), height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: NSFont.systemFont(ofSize: 14)])
+            attributes: [.font: NSFont.systemFont(ofSize: MessageTextSize.size(14))])
         return min(120, max(34, ceil(bounds.height) + 16))
     }
 
@@ -44,7 +44,7 @@ struct NativeComposer: NSViewRepresentable {
         editor.isAutomaticDashSubstitutionEnabled = false
         editor.isAutomaticSpellingCorrectionEnabled = false
         editor.isContinuousSpellCheckingEnabled = true
-        editor.font = .systemFont(ofSize: 14)
+        editor.font = .systemFont(ofSize: MessageTextSize.size(14))
         editor.textColor = .labelColor
         editor.backgroundColor = .clear
         editor.drawsBackground = false
@@ -65,6 +65,9 @@ struct NativeComposer: NSViewRepresentable {
         editor.onSend = onSend
         editor.onPasteAttachments = onPasteAttachments
         editor.isEditable = enabled
+        // Follows Cài đặt → Giao diện → Cỡ chữ while the composer stays open.
+        let readingSize = MessageTextSize.size(14)
+        if editor.font?.pointSize != readingSize { editor.font = .systemFont(ofSize: readingSize) }
         if context.coordinator.focusRequest != focusRequest {
             context.coordinator.focusRequest = focusRequest
             editor.requestTypingFocus(focusRequest != nil)

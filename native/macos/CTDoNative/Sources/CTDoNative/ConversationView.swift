@@ -632,7 +632,7 @@ struct MessageRow: View, Equatable {
                     if !caption.isEmpty {
                         HStack(alignment:.lastTextBaseline,spacing:7) {
                             Text(MessageTypography.withMentions(caption, outgoing: message.isOutgoing))
-                                .font(.system(size:14)).foregroundStyle(primary).textSelection(.enabled)
+                                .font(.system(size:MessageTextSize.size(14))).foregroundStyle(primary).textSelection(.enabled)
                                 .lineSpacing(1.5).fixedSize(horizontal:false,vertical:true)
                             timeLabel.foregroundStyle(secondary).fixedSize()
                         }

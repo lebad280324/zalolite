@@ -14,8 +14,8 @@ enum MessageTypography {
             result += AttributedString(source.substring(with:NSRange(location:offset,length:match.range.location-offset)))
             var run=AttributedString(source.substring(with:match.range(at:2)))
             switch source.substring(with:match.range(at:1)) {
-            case "**":run.font = .system(size:14,weight:.bold)
-            case "*":run.font = .system(size:14).italic()
+            case "**":run.font = .system(size:MessageTextSize.size(14),weight:.bold)
+            case "*":run.font = .system(size:MessageTextSize.size(14)).italic()
             case "__":run.underlineStyle = Text.LineStyle(pattern:.solid)
             case "~~":run.strikethroughStyle = Text.LineStyle(pattern:.solid)
             default:break
@@ -46,7 +46,7 @@ enum MessageTypography {
             guard let range = Range(match.range, in: plain),
                   let lower = AttributedString.Index(range.lowerBound, within: result),
                   let upper = AttributedString.Index(range.upperBound, within: result) else { continue }
-            result[lower..<upper].font = .system(size: 14, weight: .semibold)
+            result[lower..<upper].font = .system(size: MessageTextSize.size(14), weight: .semibold)
             result[lower..<upper].foregroundColor = outgoing ? .white : .accentColor
             if outgoing { result[lower..<upper].backgroundColor = Color.white.opacity(0.22) }
         }

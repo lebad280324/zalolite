@@ -66,12 +66,12 @@ enum RowFont: Int {
     case body, time, sender, quoteName, quoteText, pill, reaction, label
     var font: NSFont {
         switch self {
-        case .body: return .systemFont(ofSize: 14)
-        case .time: return .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
-        case .sender: return .systemFont(ofSize: 12.5, weight: .semibold)
-        case .quoteName, .pill: return .systemFont(ofSize: 12, weight: .semibold)
-        case .quoteText, .label: return .systemFont(ofSize: 12)
-        case .reaction: return .systemFont(ofSize: 10)
+        case .body: return .systemFont(ofSize: MessageTextSize.size(14))
+        case .time: return .monospacedDigitSystemFont(ofSize: MessageTextSize.size(10), weight: .regular)
+        case .sender: return .systemFont(ofSize: MessageTextSize.size(12.5), weight: .semibold)
+        case .quoteName, .pill: return .systemFont(ofSize: MessageTextSize.size(12), weight: .semibold)
+        case .quoteText, .label: return .systemFont(ofSize: MessageTextSize.size(12))
+        case .reaction: return .systemFont(ofSize: MessageTextSize.size(10))
         }
     }
 }
@@ -105,6 +105,9 @@ final class TextBlock {
     private static let measurer = NSLayoutManager()
     private static let markup = try? NSRegularExpression(pattern: #"(\*\*|__|~~|\*)(.+?)\1"#)
 
+    /// Forget prepared text and line heights after the reading size changes.
+    static func reset() { cache.removeAllObjects(); lineHeights.removeAll() }
+
     static func lineHeight(_ font: RowFont) -> CGFloat {
         if let known = lineHeights[font.rawValue] { return known }
         let value = ceil(measurer.defaultLineHeight(for: font.font)); lineHeights[font.rawValue] = value; return value
@@ -125,7 +128,7 @@ final class TextBlock {
             result.append(NSAttributedString(string: source.substring(with: NSRange(location: offset, length: match.range.location - offset)), attributes: attributes(base)))
             var run = attributes(base)
             switch source.substring(with: match.range(at: 1)) {
-            case "**": run[.font] = NSFont.systemFont(ofSize: 14, weight: .bold)
+            case "**": run[.font] = NSFont.systemFont(ofSize: MessageTextSize.size(14), weight: .bold)
             case "*": run[.font] = NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask)
             case "__": run[.underlineStyle] = NSUnderlineStyle.single.rawValue
             case "~~": run[strikeKey] = true
