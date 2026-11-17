@@ -111,6 +111,8 @@ struct RootView: View {
             if viewerURL != nil, let url = note.object as? URL { viewerURL = url }
         }
         .overlay { if store.isLocked { LockedWorkspace() } }
+        // A new reading size changes every row's height.
+        .onReceive(NotificationCenter.default.publisher(for: .messageTextSizeChanged)) { _ in store.transcript.presentationVersion += 1 }
         .overlay(alignment: .top) { CallOverlayView().padding(.top, 58) }
     }
 
@@ -168,6 +170,7 @@ struct RootView: View {
 
     private var threadList: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if prioritySplit && store.supports("set_thread_priority") && store.searchText.isEmpty { PriorityTabs() }
             if !store.ready {
                 HStack(spacing: 6) {
                     Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
@@ -280,13 +283,14 @@ struct RootView: View {
         var parts: [String] = []
         if store.unreadOnly { parts.append("Chưa đọc") }
         if store.filter != .all { parts.append(store.filter.rawValue) }
-        if store.priorityFilter == "priority" { parts.append("Ưu tiên") } else if store.priorityFilter == "other" { parts.append("Khác") }
         if !store.selectedCategory.isEmpty { parts.append(store.selectedCategory) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private func clearFilters() {
-        store.unreadOnly = false; store.filter = .all; store.priorityFilter = "all"; store.selectedCategory = ""
+        // The Ưu tiên / Khác tab is a view, not a filter, so it stays.
+        store.unreadOnly = false; store.filter = .all; store.selectedCategory = ""
+        if !prioritySplit { store.priorityFilter = "all" }
     }
 
     /// One menu carries sections, filters and the account, as the sidebar has no tab rail.
@@ -307,11 +311,6 @@ struct RootView: View {
                 Toggle("Chỉ chưa đọc", isOn: $store.unreadOnly)
                 Picker("Loại", selection: $store.filter) {
                     ForEach(AppStore.ThreadFilter.allCases) { filter in Text(filter.rawValue).tag(filter) }
-                }
-                if prioritySplit && store.supports("set_thread_priority") {
-                    Picker("Mức ưu tiên", selection: $store.priorityFilter) {
-                        Text("Tất cả").tag("all"); Text("Ưu tiên").tag("priority"); Text("Khác").tag("other")
-                    }
                 }
                 Picker("Phân loại", selection: $store.selectedCategory) {
                     Text("Mọi phân loại").tag("")

@@ -501,8 +501,8 @@ struct ThreadActionMenu: View {
             }
             row("Tải lại tin nhắn", "arrow.clockwise") { store.loadMessages(thread) }
             if store.supports("set_thread_priority") {
-                let priority = store.features.thread(thread.id)?.flag("priority") ?? false
-                row(priority ? "Chuyển sang mục Khác" : "Đưa vào Ưu tiên", "star") {
+                let priority = store.isPriority(thread)
+                row(priority ? "Chuyển sang mục Khác" : "Đưa vào Ưu tiên", priority ? "tray" : "star") {
                     store.featureThread("set_thread_priority", thread: thread, values: ["priority": .bool(!priority)])
                 }
             }

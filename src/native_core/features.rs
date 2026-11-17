@@ -242,6 +242,8 @@ impl FeatureCommand {
 #[serde(default)]
 pub(super) struct FeatureState {
     thread_features: BTreeMap<String, ThreadFeature>,
+    /// Zalo's "Khác" list (`/api/archivedchat/list`), shared with the phone and Zalo PC.
+    archived: ArchivedChats,
     bookmarks: BTreeMap<String, BTreeMap<String, SavedMessage>>,
     pinned_messages: BTreeMap<String, BTreeMap<String, SavedMessage>>,
     quick_replies: BTreeMap<String, QuickReply>,
@@ -249,6 +251,17 @@ pub(super) struct FeatureState {
     #[serde(skip)]
     loaded_for: String,
 }
+/// Conversations Zalo files under "Khác"; everything else is "Ưu tiên".
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+struct ArchivedChats {
+    /// True once the list has been read from the server at least once.
+    synced: bool,
+    version: i64,
+    /// `(id, is_group)` exactly as the server lists them.
+    items: Vec<(String, bool)>,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default)]
 struct ThreadFeature {
@@ -292,6 +305,7 @@ impl FeatureState {
     pub(super) fn snapshot(&self) -> Value {
         json!({"scope":"local",
           "thread_features":self.thread_features.iter().map(|(id,item)|json!({"thread_id":id,"priority":item.priority,"category":item.category,"alias":item.alias})).collect::<Vec<_>>(),
+          "archived_chats":{"synced":self.archived.synced,"items":self.archived.items.iter().map(|(id,group)|json!({"id":id,"is_group":group})).collect::<Vec<_>>()},
           "bookmarks":self.bookmarks.values().flat_map(|items|items.values()).collect::<Vec<_>>(),
           "pinned_messages":self.pinned_messages.values().flat_map(|items|items.values()).collect::<Vec<_>>(),
           "quick_replies":self.quick_replies.values().collect::<Vec<_>>(),
@@ -308,6 +322,31 @@ fn text(value: &str, max: usize, allow_empty: bool) -> Result<()> {
 fn identifier(value: &str) -> Result<()> {
     super::require_identifier(value)
 }
+/// `(version, [(id, is_group)])` from an `archivedchat/list` reply; `type 1` is a group.
+fn archived_items(data: &Value) -> Option<(i64, Vec<(String, bool)>)> {
+    let data = match data {
+        Value::String(text) => serde_json::from_str::<Value>(text).ok()?,
+        other => other.clone(),
+    };
+    let version = data.get("version").and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok())).unwrap_or(0);
+    let items = data.get("items")?.as_array()?;
+    Some((
+        version,
+        items
+            .iter()
+            .filter_map(|item| {
+                let id = match item.get("id")? {
+                    Value::String(id) if !id.is_empty() => id.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => return None,
+                };
+                let group = item.get("type").and_then(Value::as_i64) == Some(1);
+                Some((id, group))
+            })
+            .collect(),
+    ))
+}
+
 fn thread_index(threads: &[Thread], id: &str, group: Option<bool>) -> Result<usize> {
     identifier(id)?;
     threads
@@ -567,7 +606,18 @@ pub(super) async fn execute(
             }
             json!({"thread_id":thread_id,"invited_count":member_ids.len()})
         }
-        FeatureCommand::GetWorkspaceFeatures => state.snapshot(),
+        FeatureCommand::GetWorkspaceFeatures => {
+            if !demo {
+                // Offline or refused: keep the last list the server gave.
+                if let Ok(data) = zalo_actions::get_json(session, "label", "/api/archivedchat/list", &json!({"version":0,"imei":session.imei})).await {
+                    if let Some((version, items)) = archived_items(&data) {
+                        next.archived = ArchivedChats { synced: true, version, items };
+                        changed = true;
+                    }
+                }
+            }
+            next.snapshot()
+        }
         FeatureCommand::ListContacts { query } | FeatureCommand::ListGroups { query } => {
             text(query, 512, true)?;
             let groups = matches!(command, FeatureCommand::ListGroups { .. });
@@ -651,7 +701,27 @@ pub(super) async fn execute(
             thread_id,
             priority,
         } => {
-            thread_index(threads, thread_id, None)?;
+            let index = thread_index(threads, thread_id, None)?;
+            if !demo {
+                // Same list Zalo PC and the phone use: actionType 0 files the conversation under
+                // "Khác", 1 brings it back to "Ưu tiên" (re-notes/72).
+                let is_group = threads[index].is_group;
+                let id = clean_group_id(thread_id).to_owned();
+                let item = json!({"id": id, "type": if is_group { 1 } else { 0 }});
+                let action = if *priority { 1 } else { 0 };
+                zalo_actions::post_json(session, "label", "/api/archivedchat/update",
+                    &json!({"ids":[item],"version":state.archived.version,"actionType":action,"imei":session.imei})).await?;
+                next.archived.items.retain(|(existing, group)| !(existing == &id && *group == is_group));
+                if !*priority {
+                    next.archived.items.push((id, is_group));
+                }
+                if let Ok(data) = zalo_actions::get_json(session, "label", "/api/archivedchat/list", &json!({"version":0,"imei":session.imei})).await {
+                    if let Some((version, items)) = archived_items(&data) {
+                        next.archived = ArchivedChats { synced: true, version, items };
+                    }
+                }
+                scope = "server";
+            }
             next.thread_features
                 .entry(thread_id.clone())
                 .or_default()
@@ -948,6 +1018,17 @@ pub(super) async fn execute(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn archived_list_reads_users_and_groups() {
+        let data = serde_json::json!({"version": 7, "items": [{"id": "111", "type": 0}, {"id": 222, "type": 1}, {"id": ""}]});
+        let (version, items) = super::archived_items(&data).unwrap();
+        assert_eq!(version, 7);
+        assert_eq!(items, vec![("111".to_string(), false), ("222".to_string(), true)]);
+        let text = serde_json::json!("{\"version\":\"3\",\"items\":[]}");
+        assert_eq!(super::archived_items(&text), Some((3, vec![])));
+        assert!(super::archived_items(&serde_json::json!({"version": 1})).is_none());
+    }
+
     use super::*;
     #[test]
     fn contact_request_uses_pc_recipient_keys_and_stable_client_id() {

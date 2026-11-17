@@ -185,6 +185,25 @@ final class AppStore: ObservableObject {
                 || (message.linkTitle ?? "").range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }.reversed()
     }
+    /// Conversations Zalo files under "Khác" (`archived_chats` from the server), as `u:<id>` / `g:<id>`;
+    /// nil until the server list has been read once.
+    var archivedThreadKeys: Set<String>? {
+        guard let list = features.workspace?["archived_chats"], list["synced"]?.bool == true else { return nil }
+        return Set(list["items"]?.featureRows.map { ($0.flag("is_group") ? "g:" : "u:") + $0.string("id") } ?? [])
+    }
+    /// "Ưu tiên" unless the server lists the conversation under "Khác"; before the first sync the local flag decides.
+    func isPriority(_ thread: ThreadSnapshot, archived: Set<String>? = nil) -> Bool {
+        if let keys = archived ?? archivedThreadKeys {
+            let id = thread.isGroup ? String(thread.id.drop { $0 == "g" }) : thread.id
+            return !keys.contains((thread.isGroup ? "g:" : "u:") + id)
+        }
+        return features.thread(thread.id)?.value["priority"]?.bool ?? true
+    }
+    /// Unread conversations in the tab that is not shown, for the dot on its label.
+    func unreadCount(priority: Bool) -> Int {
+        let archived = archivedThreadKeys
+        return threads.filter { !$0.hidden && $0.hasUnread && isPriority($0, archived: archived) == priority }.count
+    }
     private struct FilterKey: Equatable {
         let search:String, filter:ThreadFilter, priority:String, category:String
         let unread:Bool
@@ -195,11 +214,12 @@ final class AppStore: ObservableObject {
     var filteredThreads: [ThreadSnapshot] {
         let key=FilterKey(search:searchText,filter:filter,priority:priorityFilter,category:selectedCategory,unread:unreadOnly,selected:selectedThreadID,opened:recentlyOpenedIDs)
         if let cached=filterCache,cached.key==key { return cached.rows }
+        let archived=archivedThreadKeys
         let result=threads.filter { thread in
             !thread.hidden &&
             (thread.lastMessageTimestamp > 0 || thread.id == selectedThreadID || recentlyOpenedIDs.contains(thread.id)) &&
             (!(features.thread(thread.id)?.flag("hidden") ?? false)) &&
-            (priorityFilter == "all" || (features.thread(thread.id)?.flag("priority") ?? false) == (priorityFilter == "priority")) &&
+            (priorityFilter == "all" || !searchText.isEmpty || isPriority(thread, archived: archived) == (priorityFilter == "priority")) &&
             (selectedCategory.isEmpty || features.thread(thread.id)?.string("category") == selectedCategory) &&
             (!unreadOnly || thread.hasUnread) &&
             (filter == .all || (filter == .groups ? thread.isGroup : !thread.isGroup)) &&

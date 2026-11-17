@@ -19,7 +19,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   case .privacy: return ["Ngày sinh", "Trạng thái truy cập", "Trạng thái đã xem", "Người được nhắn tin", "Người được gọi", "Danh sách chặn", "Tìm qua số điện thoại", "Nguồn kết bạn", "Đang soạn"]
   case .sync: return ["Đồng bộ từ điện thoại", "Xuất bản sao", "Nhập lịch sử", "Sao lưu"]
   case .storage: return ["Dung lượng", "Bộ nhớ đệm", "Dọn dữ liệu", "Ổ đĩa", "Thư mục dữ liệu", "Hủy tải"]
-  case .appearance: return ["Sáng", "Tối", "Theo hệ thống", "Avatar làm nền", "Ảnh thu nhỏ"]
+  case .appearance: return ["Sáng", "Tối", "Theo hệ thống", "Avatar làm nền", "Ảnh thu nhỏ", "Cỡ chữ", "Font", "Phông chữ"]
   case .notifications: return ["Quyền thông báo", "Âm thanh", "Xem trước nội dung", "Huy hiệu Dock", "Cuộc gọi đến"]
   case .messages: return ["Tin nhắn nhanh", "Mẫu tin", "Ưu tiên và Khác", "Thư mục lưu tệp", "Nhấp đúp để trả lời", "Return để gửi", "Tải trước media", "Dán Excel", "Ảnh thu nhỏ"]
   case .calls: return ["Micrô", "Camera", "Loa", "Thông báo cuộc gọi đến", "Quyền thiết bị"]
@@ -43,7 +43,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   case .privacy: return "Ai được xem thông tin và liên hệ với bạn."
   case .sync: return "Đồng bộ từ điện thoại, xuất và nhập bản sao lưu."
   case .storage: return "Dung lượng dữ liệu và thư mục lưu trên máy."
-  case .appearance: return "Chế độ màu và hình nền cuộc trò chuyện."
+  case .appearance: return "Chế độ màu, cỡ chữ và hình nền cuộc trò chuyện."
   case .notifications: return "Thông báo tin nhắn, âm thanh và huy hiệu."
   case .messages: return "Cách soạn, đọc và lưu tin nhắn."
   case .calls: return "Micrô, camera và thông báo cuộc gọi."
@@ -264,13 +264,14 @@ struct SettingsView: View {
   case .appearance:
    Section("Màu sắc") { Picker("Chế độ", selection: $appearance) { Text("Theo hệ thống").tag("system"); Text("Sáng").tag("light"); Text("Tối").tag("dark") }; Text("Thanh công cụ, ô soạn và bảng nổi dùng Liquid Glass của macOS, tự giảm độ trong suốt theo cài đặt Trợ năng.").font(.caption).foregroundStyle(.secondary) }
    Section { ChatBackgroundPicker() } header: { Text("Hình nền cuộc trò chuyện") } footer: { Text("Áp dụng cho mọi cuộc trò chuyện trên máy này.").font(.caption).foregroundStyle(.secondary) }
+   Section { MessageTextSizePicker() } header: { Text("Cỡ chữ") } footer: { Text("Áp dụng cho nội dung tin nhắn, trích dẫn và ô soạn tin.").font(.caption).foregroundStyle(.secondary) }
    Section("Khung trò chuyện") { Toggle("Hiển thị ảnh thu nhỏ", isOn: $thumbnails) }
   case .notifications:
    Section("Quyền từ macOS") { LabeledContent("Quyền thông báo", value: system.notificationStatus); Button("Yêu cầu quyền thông báo") { system.requestNotifications() } }
    Section("Thông báo trên máy") { Toggle("Thông báo tin nhắn và nhắc hẹn", isOn: $notifications); Toggle("Âm thanh thông báo", isOn: $notificationSound).disabled(!notifications); Toggle("Hiện tên và nội dung tin nhắn trong thông báo", isOn: $notificationPreview).disabled(!notifications); Toggle("Hiện số tin chưa đọc trên Dock", isOn: $dockBadge); Text("Hội thoại đã tắt thông báo hoặc đã ẩn không tạo thông báo. Khi ứng dụng đang khóa, thông báo không hiện nội dung.").font(.caption).foregroundStyle(.secondary); Text("Nếu macOS chặn thông báo, bật tùy chọn trong app không thể vượt qua quyền hệ thống.").font(.caption).foregroundStyle(.secondary) }
   case .messages:
    Section("Soạn và đọc") { Toggle("Return để gửi; Shift + Return xuống dòng", isOn: $sendWithReturn); Toggle("Nhấp đúp tin nhắn để trả lời", isOn: $doubleClickReply); Toggle("Hiển thị ảnh thu nhỏ", isOn: $thumbnails) }
-   Section("Danh sách hội thoại") { Toggle("Tách Ưu tiên và Khác", isOn: $prioritySplit); Text("Phân loại Ưu tiên/Khác được lưu trên máy cho tài khoản này.").font(.caption).foregroundStyle(.secondary) }
+   Section("Danh sách hội thoại") { Toggle("Tách Ưu tiên và Khác", isOn: $prioritySplit); Text("Ưu tiên và Khác đồng bộ với Zalo trên điện thoại và máy tính. Nhấp chuột phải vào hội thoại để chuyển qua lại.").font(.caption).foregroundStyle(.secondary) }
    Section("Lưu tệp nhận được") {
     LabeledContent("Thư mục lưu", value: downloadDirectory.isEmpty ? "Hỏi mỗi lần lưu" : downloadDirectory)
     HStack { Button("Chọn thư mục…") { chooseDownloadDirectory() }; if !downloadDirectory.isEmpty { Button("Luôn hỏi") { downloadDirectory = "" } } }

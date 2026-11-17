@@ -154,7 +154,7 @@ struct ThreadManagementMenu: View {
  @EnvironmentObject var store: AppStore
  let thread: ThreadSnapshot
  var body: some View {
-  if store.supports("set_thread_priority") { Button(store.features.thread(thread.id)?.flag("priority") == true ? "Chuyển sang mục Khác" : "Đưa vào Ưu tiên", systemImage: "star") { store.featureThread("set_thread_priority", thread: thread, values: ["priority": .bool(!(store.features.thread(thread.id)?.flag("priority") ?? false))]) } }
+  if store.supports("set_thread_priority") { let priority = store.isPriority(thread); Button(priority ? "Chuyển sang mục Khác" : "Đưa vào Ưu tiên", systemImage: priority ? "tray" : "star") { store.featureThread("set_thread_priority", thread: thread, values: ["priority": .bool(!priority)]) } }
   if !thread.isGroup && store.supports("update_alias") { Button("Đặt tên gợi nhớ…", systemImage: "pencil") { store.aliasThread = thread } }
   if store.supports("set_thread_category") { Button("Phân loại…", systemImage: "tag") { store.threadOptions = thread } }
   if store.supports("mark_thread_unread") { Button(thread.hasUnread ? "Đánh dấu đã đọc" : "Đánh dấu chưa đọc", systemImage: "circle.badge") { store.featureThread("mark_thread_unread", thread: thread, values: ["unread": .bool(!thread.hasUnread)]) } }
