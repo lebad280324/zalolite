@@ -2,8 +2,12 @@ import XCTest
 @testable import CTDoNative
 
 final class UpdaterTests: XCTestCase {
-    private func release(_ json: [String: Any]) -> UpdateRelease? {
-        UpdateRelease(json: try! JSONSerialization.data(withJSONObject: json))
+    private func release(_ json: [String: Any], architecture: String = "arm64") -> UpdateRelease? {
+        UpdateRelease(json: try! JSONSerialization.data(withJSONObject: json), architecture: architecture)
+    }
+
+    private func zip(_ name: String) -> [String: Any] {
+        ["name": name, "size": 22_000_000, "browser_download_url": "https://github.com/lebad280324/zalolite/releases/download/v0.0.12/\(name)"]
     }
 
     private let assets: [[String: Any]] = [
@@ -28,6 +32,19 @@ final class UpdaterTests: XCTestCase {
         foreign[2]["browser_download_url"] = "https://example.com/Zalolite-0.0.11-macos-arm64.zip"
         XCTAssertNil(release(["tag_name": "v0.0.11", "assets": foreign]))
         XCTAssertNil(release(["tag_name": "v0.0.11", "assets": Array(assets.dropFirst())]))
+    }
+
+    func testPrefersUniversalAndNeverPicksAnotherChipsZip() throws {
+        let sums = assets[0]
+        let universal = [sums, zip("Zalolite-0.0.12-macos-arm64.zip"), zip("Zalolite-0.0.12-macos-universal.zip")]
+        for architecture in ["arm64", "x86_64"] {
+            let value = try XCTUnwrap(release(["tag_name": "v0.0.12", "assets": universal], architecture: architecture))
+            XCTAssertEqual(value.archiveName, "Zalolite-0.0.12-macos-universal.zip")
+        }
+        let appleOnly = [sums, zip("Zalolite-0.0.12-macos-arm64.zip")]
+        XCTAssertNil(release(["tag_name": "v0.0.12", "assets": appleOnly], architecture: "x86_64"))
+        let intel = try XCTUnwrap(release(["tag_name": "v0.0.12", "assets": [sums, zip("Zalolite-0.0.12-macos-x86_64.zip")]], architecture: "x86_64"))
+        XCTAssertEqual(intel.archiveName, "Zalolite-0.0.12-macos-x86_64.zip")
     }
 
     func testComparesVersionsNumerically() {

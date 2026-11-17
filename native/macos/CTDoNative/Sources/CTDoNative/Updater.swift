@@ -16,8 +16,18 @@ struct UpdateRelease: Equatable {
     static let repository = "lebad280324/zalolite"
     static let latestURL = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
 
-    /// Reads the `releases/latest` payload; nil when the release has no Apple Silicon ZIP or no checksum list.
-    init?(json data: Data) {
+    /// The slice this process runs as; a Rosetta-translated Intel build reports x86_64.
+    static var hostArchitecture: String {
+        #if arch(arm64)
+        "arm64"
+        #else
+        "x86_64"
+        #endif
+    }
+
+    /// Reads the `releases/latest` payload; nil when the release has no ZIP this Mac can run or no checksum list.
+    /// A Universal ZIP is preferred; a single-architecture ZIP is used only when it matches `architecture`.
+    init?(json data: Data, architecture: String = UpdateRelease.hostArchitecture) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               (root["draft"] as? Bool) != true, (root["prerelease"] as? Bool) != true,
               let tag = root["tag_name"] as? String, let version = Self.normalized(tag),
@@ -31,7 +41,10 @@ struct UpdateRelease: Equatable {
             }
             return nil
         }
-        guard let zip = asset({ $0.hasPrefix("Zalolite-") && $0.hasSuffix("-macos-arm64.zip") && !$0.contains("/") }),
+        func named(_ suffix: String) -> (String, URL, Int)? {
+            asset { $0.hasPrefix("Zalolite-") && $0.hasSuffix("-macos-\(suffix).zip") && !$0.contains("/") }
+        }
+        guard let zip = named("universal") ?? named(architecture),
               let sums = asset({ $0 == "SHA256SUMS.txt" }) else { return nil }
         self.version = version
         notes = (root["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -214,6 +227,10 @@ struct UpdateRelease: Equatable {
               info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
               info["CFBundleShortVersionString"] as? String == version else {
             throw UpdateError("Gói cập nhật không phải Zalolite \(version).")
+        }
+        let slice = UpdateRelease.hostArchitecture == "arm64" ? NSBundleExecutableArchitectureARM64 : NSBundleExecutableArchitectureX86_64
+        guard Bundle(url: app)?.executableArchitectures?.contains(NSNumber(value: slice)) == true else {
+            throw UpdateError("Gói cập nhật không chạy được trên chip của máy này.")
         }
         try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path], failure: "Chữ ký của gói cập nhật không hợp lệ.")
         return app

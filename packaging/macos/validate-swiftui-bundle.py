@@ -22,6 +22,12 @@ def validate(app):
     for binary in (frontend, core):
         assert binary.is_file() and binary.stat().st_mode & 0o111, f"Not executable: {binary.name}"
     assert architectures(frontend) == architectures(core), "Frontend/worker architectures differ"
+    # Every bundled helper must run on each architecture the frontend runs on.
+    for name in ("Helpers/HistoryCodec", "Helpers/DailyNotifier.app/Contents/MacOS/DailyNotifier",
+                 "Resources/EmojiPreview", "Resources/MediaPreview", "Resources/DailyMediaViewer"):
+        helper = contents / name
+        if helper.is_file():
+            assert architectures(helper) == architectures(frontend), f"Helper architectures differ: {helper.name}"
     for path in contents.rglob("*"):
         name = path.name.lower()
         assert not (name.startswith("session") and name.endswith(".json")), "Session in bundle"

@@ -23,6 +23,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -37,9 +39,9 @@ jobs:
           CTDOZLITE_TEST_CORE="$PWD/dist/Zalolite.app/Contents/Helpers/ctdozlite-core" python3 tests/native_core_stdio.py
           python3 tests/native_worker_ownership.py dist/Zalolite.app/Contents/Helpers/ctdozlite-core
       - name: Archive application
-        run: ditto -c -k --sequesterRsrc --keepParent dist/Zalolite.app dist/Zalolite-macos-arm64.zip
+        run: ditto -c -k --sequesterRsrc --keepParent dist/Zalolite.app dist/Zalolite-macos-universal.zip
       - uses: actions/upload-artifact@v6
         with:
-          name: Zalolite-macos-arm64
-          path: dist/Zalolite-macos-arm64.zip
+          name: Zalolite-macos-universal
+          path: dist/Zalolite-macos-universal.zip
           if-no-files-found: error

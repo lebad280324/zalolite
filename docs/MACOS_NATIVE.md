@@ -6,12 +6,15 @@ mã hóa, HTTP/WebSocket và SQLite vẫn do Rust xử lý.
 
 Bản native được xây dựng riêng với bản egui hiện có. Gói này có định danh ứng
 dụng riêng, không tự thay `/Applications/ctdozlite.app` và không dùng trình cập
-nhật của bản egui. Bản v0.0.10 được đóng gói riêng cho macOS Apple Silicon.
+nhật của bản egui. Từ v0.0.12, gói phát hành là bản Universal chạy trên cả Mac Apple Silicon
+và Mac Intel (macOS 14 trở lên); macOS tự chọn mã máy đúng với chip khi mở ứng dụng.
 
 ## Xây dựng và mở ứng dụng
 
 Cần Rust, Xcode Command Line Tools và macOS 14 trở lên để xây dựng frontend.
-Môi trường được kiểm tra trong đợt triển khai này là macOS 27 trên Apple Silicon.
+Môi trường được kiểm tra trong đợt triển khai này là macOS 27 trên Apple Silicon; phần Intel được
+chạy thử qua Rosetta. Bản Universal cần thêm target Rust `x86_64-apple-darwin`
+(`rustup target add x86_64-apple-darwin`); `--host-arch` chỉ build cho chip của máy đang dùng, nhanh hơn khi phát triển.
 
 ```sh
 bash packaging/package-native-macos.sh --debug
@@ -213,12 +216,15 @@ không lặp lại ở mỗi lượt vẽ hoặc khi gõ ở nơi khác.
 **Cài đặt → Cập nhật phần mềm** (hoặc menu **Zalolite → Kiểm tra cập nhật…**) hỏi
 `https://api.github.com/repos/lebad280324/zalolite/releases/latest`. Bản mới chỉ xuất hiện khi có
 một GitHub Release (không phải bản nháp hay pre-release) với tag dạng `v0.0.11`, có tệp
-`Zalolite-<phiên-bản>-macos-arm64.zip` và `SHA256SUMS.txt`. Mỗi commit mới không tự thành bản cập nhật.
+gói ZIP chạy được trên chip của máy và `SHA256SUMS.txt`. Ứng dụng ưu tiên
+`Zalolite-<phiên-bản>-macos-universal.zip`; nếu không có thì chỉ nhận gói đúng chip (`-macos-arm64.zip` hoặc
+`-macos-x86_64.zip`), không bao giờ tải gói của chip khác. Mỗi commit mới không tự thành bản cập nhật.
 
 Khi người dùng chọn **Tải và cài đặt**, ứng dụng:
 
 1. Tải `SHA256SUMS.txt` và gói ZIP từ `github.com` qua HTTPS.
-2. Đối chiếu SHA-256, giải nén bằng `ditto`, kiểm tra bundle ID, đúng số phiên bản và `codesign --verify --deep --strict`.
+2. Đối chiếu SHA-256, giải nén bằng `ditto`, kiểm tra bundle ID, đúng số phiên bản, có mã máy cho chip hiện tại
+   và `codesign --verify --deep --strict`.
 3. Thoát; một script nhỏ chờ tiến trình kết thúc, thay `Zalolite.app` (khôi phục bản cũ nếu không thay được) rồi mở bản mới.
 
 Nếu thư mục chứa ứng dụng không cho ghi, gói đã kiểm tra được mở trong Finder để người dùng tự kéo vào
@@ -228,4 +234,8 @@ không thay được việc bảo vệ tài khoản GitHub phát hành.
 
 Phát hành bản mới: tăng `version` trong `Cargo.toml`, chạy `packaging/package-native-macos.sh`, rồi
 `packaging/make-native-release.sh` để tạo ZIP, DMG và `SHA256SUMS.txt` trong `dist/`. Script in sẵn lệnh
-`gh release create v<phiên-bản> …` để đăng Release lên `lebad280324/zalolite`.
+`gh release create v<phiên-bản> …` để đăng Release lên `lebad280324/zalolite`. Với bản Universal, script tạo thêm
+một bản sao `-macos-arm64.zip` cùng nội dung để Zalolite 0.0.11 (chỉ biết tên đó) vẫn tự cập nhật được.
+
+Giữ `version` của bản build thử không thấp hơn bản đã phát hành: trình cập nhật coi bản thấp hơn là bản cũ và
+sẽ đề nghị thay nó bằng bản trên GitHub.

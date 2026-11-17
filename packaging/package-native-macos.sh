@@ -6,13 +6,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION=release
 BUILD=1
 WITH_HELPERS=1
+# Releases are Universal (Apple Silicon + Intel); --host-arch is a faster local build.
+ARCHS=(arm64 x86_64)
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --debug) CONFIGURATION=debug ;;
         --no-build) BUILD=0 ;;
         --without-legacy-helpers) WITH_HELPERS=0 ;;
+        --host-arch) ARCHS=("$(uname -m)") ;;
         --help)
-            printf 'Usage: %s [--debug] [--no-build] [--without-legacy-helpers]\n' "$0"
+            printf 'Usage: %s [--debug] [--no-build] [--without-legacy-helpers] [--host-arch]\n' "$0"
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
     esac
@@ -37,28 +40,43 @@ SWIFT_BUILD_OPTIONS=()
 if [[ -n "${CTDOZLITE_SWIFT_BUILD_SYSTEM:-}" ]]; then
     SWIFT_BUILD_OPTIONS+=(--build-system "$CTDOZLITE_SWIFT_BUILD_SYSTEM")
 fi
-if [[ "$BUILD" == 1 ]]; then
-    CARGO_OPTIONS=(build --locked --bin ctdozlite-core)
-    if [[ "$CONFIGURATION" == release ]]; then CARGO_OPTIONS+=(--release); fi
-    "$CARGO_COMMAND" "${CARGO_OPTIONS[@]}"
-    xcrun swift build ${SWIFT_BUILD_OPTIONS[@]+"${SWIFT_BUILD_OPTIONS[@]}"} --package-path "$SWIFT_PACKAGE" --scratch-path "$SWIFT_BUILD" \
-        --configuration "$CONFIGURATION" --disable-sandbox
-fi
-
-CORE="$ROOT_DIR/target/$CONFIGURATION/ctdozlite-core"
-SWIFT_BIN_DIR="$(xcrun swift build ${SWIFT_BUILD_OPTIONS[@]+"${SWIFT_BUILD_OPTIONS[@]}"} --package-path "$SWIFT_PACKAGE" --scratch-path "$SWIFT_BUILD" \
-    --configuration "$CONFIGURATION" --show-bin-path --disable-sandbox)"
-[[ -x "$CORE" && -x "$SWIFT_BIN_DIR/CTDoNative" ]] || {
-    printf 'Missing native frontend or Rust worker; build before packaging.\n' >&2; exit 1;
-}
+# Each slice is kept apart because SwiftPM reuses one product path for every --arch.
+SLICES="$ROOT_DIR/target/native-slices/$CONFIGURATION"
+export MACOSX_DEPLOYMENT_TARGET=14.0
+for arch in "${ARCHS[@]}"; do
+    case "$arch" in
+        arm64) RUST_TARGET=aarch64-apple-darwin ;;
+        x86_64) RUST_TARGET=x86_64-apple-darwin ;;
+        *) printf 'Unsupported architecture: %s\n' "$arch" >&2; exit 2 ;;
+    esac
+    if [[ "$BUILD" == 1 ]]; then
+        CARGO_OPTIONS=(build --locked --bin ctdozlite-core --target "$RUST_TARGET")
+        if [[ "$CONFIGURATION" == release ]]; then CARGO_OPTIONS+=(--release); fi
+        "$CARGO_COMMAND" "${CARGO_OPTIONS[@]}"
+        SWIFT_ARGS=(${SWIFT_BUILD_OPTIONS[@]+"${SWIFT_BUILD_OPTIONS[@]}"} --package-path "$SWIFT_PACKAGE" --scratch-path "$SWIFT_BUILD"
+            --configuration "$CONFIGURATION" --arch "$arch" --disable-sandbox)
+        xcrun swift build "${SWIFT_ARGS[@]}"
+        mkdir -p "$SLICES/$arch"
+        cp "$("$CARGO_COMMAND" metadata --locked --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/$RUST_TARGET/$CONFIGURATION/ctdozlite-core" \
+            "$SLICES/$arch/ctdozlite-core"
+        cp "$(xcrun swift build "${SWIFT_ARGS[@]}" --show-bin-path)/CTDoNative" "$SLICES/$arch/CTDoNative"
+    fi
+    for binary in CTDoNative ctdozlite-core; do
+        [[ -x "$SLICES/$arch/$binary" ]] && lipo "$SLICES/$arch/$binary" -verify_arch "$arch" || {
+            printf 'Missing %s slice of %s; build before packaging.\n' "$arch" "$binary" >&2; exit 1;
+        }
+    done
+done
+lipo_all() { local inputs=(); for arch in "${ARCHS[@]}"; do inputs+=("$SLICES/$arch/$1"); done; lipo -create "${inputs[@]}" -output "$2"; }
 VERSION="$("$CARGO_COMMAND" metadata --locked --no-deps --format-version 1 \
     | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "ctdozlite"))')"
 STAGE_DIR="$(mktemp -d "$ROOT_DIR/dist/.native-stage.XXXXXX")"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 APP="$STAGE_DIR/Zalolite.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources"
-cp "$SWIFT_BIN_DIR/CTDoNative" "$APP/Contents/MacOS/CTDoNative"
-cp "$CORE" "$APP/Contents/Helpers/ctdozlite-core"
+lipo_all CTDoNative "$APP/Contents/MacOS/CTDoNative"
+lipo_all ctdozlite-core "$APP/Contents/Helpers/ctdozlite-core"
 cp packaging/macos/Native-Info.plist "$APP/Contents/Info.plist"
 cp LICENSE-MIT LICENSE-APACHE NOTICE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
@@ -66,7 +84,8 @@ plutil -replace CFBundleVersion -string "$(date -u +%Y%m%d%H%M%S)" "$APP/Content
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 if [[ "$WITH_HELPERS" == 1 ]]; then
-    env -u HISTORY_CODEC_ASSETS SWIFT_TARGETS="$(uname -m)-apple-macosx14.0" \
+    HELPER_TARGETS="$(printf '%s-apple-macosx14.0,' "${ARCHS[@]}")"
+    env -u HISTORY_CODEC_ASSETS SWIFT_TARGETS="${HELPER_TARGETS%,}" \
         bash native/macos/build-native-helpers.sh "$APP"
     cp sync_v2_helper.js zproto_lib.js "$APP/Contents/Resources/"
 fi
@@ -98,4 +117,4 @@ DESTINATION="$ROOT_DIR/dist/Zalolite.app"
 # Only replace this script's build artifact; never the installed application.
 if [[ -e "$DESTINATION" ]]; then rm -rf "$DESTINATION"; fi
 mv "$APP" "$DESTINATION"
-printf 'Built %s\n' "$DESTINATION"
+printf 'Built %s (%s)\n' "$DESTINATION" "$(lipo -archs "$DESTINATION/Contents/MacOS/CTDoNative")"
