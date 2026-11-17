@@ -95,6 +95,8 @@ struct UpdateRelease: Equatable {
     enum Phase: Equatable {
         case idle, checking, upToDate, available(UpdateRelease)
         case downloading(UpdateRelease, Double), installing(UpdateRelease)
+        /// Downloaded and verified; waits for "Khởi động lại", or is installed when Zalolite quits.
+        case ready(UpdateRelease)
         /// Downloaded and verified, but the app folder is not writable: the user moves it.
         case manual(UpdateRelease, URL)
         case failed(String)
@@ -103,11 +105,15 @@ struct UpdateRelease: Equatable {
     @Published private(set) var phase = Phase.idle
     @Published private(set) var lastCheck: Date? = UserDefaults.standard.object(forKey: lastCheckKey) as? Date
     private var task: Task<Void, Never>?
+    /// The verified bundle waiting to replace this one.
+    private var staged: (target: URL, app: URL, work: URL)?
+    private var swapLaunched = false
 
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0" }
     var available: UpdateRelease? {
         switch phase { case .available(let release), .downloading(let release, _): return release; default: return nil }
     }
+    var readyRelease: UpdateRelease? { if case .ready(let release) = phase { return release }; return nil }
     var busy: Bool {
         switch phase { case .checking, .downloading, .installing: return true; default: return false }
     }
@@ -121,6 +127,7 @@ struct UpdateRelease: Equatable {
 
     func check(quietly: Bool = false) {
         guard !busy else { return }
+        if case .ready = phase { return }
         if !quietly { phase = .checking }
         task = Task {
             do {
@@ -173,7 +180,8 @@ struct UpdateRelease: Equatable {
                     NSWorkspace.shared.activateFileViewerSelecting([app])
                     return
                 }
-                try Self.relaunch(replacing: target, with: app, work: work)
+                staged = (target, app, work)
+                phase = .ready(release)
             } catch is CancellationError {
                 phase = .available(release)
             } catch {
@@ -238,11 +246,29 @@ struct UpdateRelease: Equatable {
 
     /// Hands the swap to a small script that waits for this process to quit, replaces the bundle
     /// (restoring the old one if the move fails) and opens the new version.
-    private static func relaunch(replacing target: URL, with app: URL, work: URL) throws {
+    /// "Khởi động lại": quit now; the new version replaces this one and opens.
+    func restartNow() {
+        guard staged != nil else { return }
+        do { try launchSwap(reopen: true); NSApp.terminate(nil) } catch { phase = .failed("Không cài được bản cập nhật. Hãy thử lại.") }
+    }
+
+    /// Called while Zalolite quits: a version left for later is installed without reopening.
+    func installStagedOnQuit() {
+        guard staged != nil, !swapLaunched else { return }
+        try? launchSwap(reopen: false)
+    }
+
+    private func launchSwap(reopen: Bool) throws {
+        guard let staged, !swapLaunched else { return }
+        try Self.startSwap(replacing: staged.target, with: staged.app, work: staged.work, reopen: reopen)
+        swapLaunched = true
+    }
+
+    private static func startSwap(replacing target: URL, with app: URL, work: URL, reopen: Bool) throws {
         let script = work.appendingPathComponent("install.sh")
         try """
         #!/bin/sh
-        pid="$1"; target="$2"; new="$3"; backup="$4"
+        pid="$1"; target="$2"; new="$3"; backup="$4"; reopen="$5"
         while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
         mv "$target" "$backup" || { open "$target"; exit 1; }
         if mv "$new" "$target"; then
@@ -251,14 +277,14 @@ struct UpdateRelease: Equatable {
         else
           mv "$backup" "$target"
         fi
-        open "$target"
+        [ "$reopen" = 1 ] && open "$target"
+        exit 0
         """.write(to: script, atomically: true, encoding: .utf8)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [script.path, String(ProcessInfo.processInfo.processIdentifier), target.path, app.path,
-                             work.appendingPathComponent("previous.app").path]
+                             work.appendingPathComponent("previous.app").path, reopen ? "1" : "0"]
         try process.run()
-        NSApp.terminate(nil)
     }
 
     nonisolated private static func run(_ tool: String, _ arguments: [String], failure: String) throws {

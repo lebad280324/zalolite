@@ -28,14 +28,14 @@ struct SoftwareUpdateSection: View {
         }
         Section("Tự động") {
             Toggle("Tự động kiểm tra bản mới mỗi ngày", isOn: $autoCheck)
-            Text("Zalolite hỏi trang Releases của dự án trên GitHub, không gửi tài khoản hay dữ liệu chat. Gói tải về được đối chiếu mã SHA-256 và chữ ký trước khi cài; ứng dụng tự mở lại sau khi cập nhật.")
+            Text("Zalolite hỏi trang Releases của dự án trên GitHub, không gửi tài khoản hay dữ liệu chat. Gói tải về được đối chiếu mã SHA-256 và chữ ký trước khi cài. Tải xong, bạn chọn Khởi động lại ngay hoặc Để sau (bản mới được cài khi thoát Zalolite).")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
 
     private var shownRelease: UpdateRelease? {
         switch updater.phase {
-        case .available(let release), .downloading(let release, _), .installing(let release), .manual(let release, _): return release
+        case .available(let release), .downloading(let release, _), .installing(let release), .manual(let release, _), .ready(let release): return release
         default: return nil
         }
     }
@@ -64,7 +64,9 @@ struct SoftwareUpdateSection: View {
                 Button("Hủy") { updater.cancel() }
             }
         case .installing:
-            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Đang kiểm tra và cài đặt… Zalolite sẽ tự mở lại.").foregroundStyle(.secondary) }
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Đang kiểm tra gói cập nhật…").foregroundStyle(.secondary) }
+        case .ready(let release):
+            ReadyToRestart(release: release)
         case .manual(_, let app):
             VStack(alignment: .leading, spacing: 6) {
                 Label("Đã tải và kiểm tra xong bản mới.", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
@@ -91,9 +93,13 @@ struct UpdateMenuItem: View {
     @ObservedObject private var updater = SoftwareUpdater.shared
     let openPage: () -> Void
     var body: some View {
-        Button(updater.available.map { "Cài bản cập nhật \($0.version)…" } ?? "Kiểm tra cập nhật…") {
-            if updater.available == nil { updater.check() }
-            openPage()
+        if let ready = updater.readyRelease {
+            Button("Khởi động lại để cài \(ready.version)") { updater.restartNow() }
+        } else {
+            Button(updater.available.map { "Cài bản cập nhật \($0.version)…" } ?? "Kiểm tra cập nhật…") {
+                if updater.available == nil { updater.check() }
+                openPage()
+            }
         }
     }
 }
@@ -130,7 +136,7 @@ struct UpdateToolbarButton: View {
 
     private var shownRelease: UpdateRelease? {
         switch updater.phase {
-        case .available(let release), .downloading(let release, _), .installing(let release), .manual(let release, _): return release
+        case .available(let release), .downloading(let release, _), .installing(let release), .manual(let release, _), .ready(let release): return release
         case .failed: return lastRelease
         default: return nil
         }
@@ -139,7 +145,8 @@ struct UpdateToolbarButton: View {
     private var title: String {
         switch updater.phase {
         case .downloading(_, let fraction): return "\(Int(fraction * 100))%"
-        case .installing: return "Đang cài…"
+        case .installing: return "Đang kiểm tra…"
+        case .ready: return "Khởi động lại"
         case .failed: return "Lỗi cập nhật"
         default: return "Cập nhật"
         }
@@ -153,6 +160,8 @@ struct UpdateToolbarButton: View {
             ProgressView().controlSize(.small)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 15, weight: .medium))
+        case .ready:
+            Image(systemName: "arrow.clockwise.circle.fill").font(.system(size: 16, weight: .medium))
         default:
             Image(systemName: "arrow.down.circle.fill").font(.system(size: 16, weight: .medium))
         }
@@ -194,7 +203,9 @@ struct UpdateToolbarButton: View {
                 Button("Hủy") { updater.cancel() }
             }
         case .installing:
-            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Đang kiểm tra và cài đặt. Zalolite sẽ tự mở lại.").font(.callout).foregroundStyle(.secondary) }
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Đang kiểm tra gói cập nhật…").font(.callout).foregroundStyle(.secondary) }
+        case .ready(let release):
+            ReadyToRestart(release: release) { open = false }
         case .manual(_, let app):
             VStack(alignment: .leading, spacing: 8) {
                 Text("Đã tải và kiểm tra xong. Thoát Zalolite rồi kéo bản mới trong Finder vào thư mục Applications.").font(.callout).foregroundStyle(.secondary)
@@ -224,5 +235,27 @@ struct UpdateToolbarButton: View {
 
     private func notes(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+}
+
+/// "Khởi động lại" now, or "Để sau": the verified update is then installed when Zalolite quits.
+struct ReadyToRestart: View {
+    @ObservedObject private var updater = SoftwareUpdater.shared
+    let release: UpdateRelease
+    var dismiss: () -> Void = {}
+    @State private var later = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Đã tải và kiểm tra xong Zalolite \(release.version).", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+            Text(later ? "Bản mới sẽ được cài khi bạn thoát Zalolite. Bạn vẫn có thể khởi động lại bất cứ lúc nào."
+                       : "Khởi động lại để dùng bản mới. Tin nhắn và cài đặt được giữ nguyên.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                if !later { Button("Để sau") { later = true; dismiss() } }
+                Button("Khởi động lại") { updater.restartNow() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+            }
+        }
     }
 }

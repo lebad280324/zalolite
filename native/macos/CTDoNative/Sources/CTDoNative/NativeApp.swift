@@ -204,6 +204,8 @@ final class NativeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let event = NSApp.currentEvent
         BackgroundMode.note("quit requested event=\(event.map { "\($0.type.rawValue)/\($0.charactersIgnoringModifiers ?? "")" } ?? "none") windows=\(NSApp.windows.filter(\.isVisible).count)")
+        // A downloaded update the user left for later is installed once this process exits.
+        SoftwareUpdater.shared.installStagedOnQuit()
         guard let store else { return .terminateNow }
         store.stop {
             Task { @MainActor in sender.reply(toApplicationShouldTerminate: true) }
