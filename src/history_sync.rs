@@ -236,58 +236,23 @@ where
 
     if send_phone_prompt {
         set_last_mobile_sync_status(None);
-
-        // Phase 1: Send mobile wake-up / pull request to phone (`cmd 12000` + WebSocket `cmd 592` & `cmd 590`)
-        on_progress(
-            0.10,
-            "📲 Đang gửi yêu cầu đồng bộ tới Zalo trên điện thoại (hãy mở Zalo trên điện thoại và bấm 'Đồng bộ ngay')…".to_string(),
-        );
-        let _ = chat::request_phone_sync(s, &pub_key).await;
-        let _ = chat::request_phone_sync_v2(s, &pub_key).await;
-
-        // Wait for user to confirm on phone (up to 90 seconds)
-        let deadline = std::time::Instant::now() + Duration::from_secs(90);
-        let mut confirmed = false;
-        while std::time::Instant::now() < deadline {
-            if PHONE_SYNC_CANCEL.load(Ordering::Relaxed) {
-                let _ = chat::cancel_phone_sync(s, &pub_key).await;
-                return Ok((0, 0));
-            }
-            if let Some(ref st) = last_mobile_sync_status() {
-                if st.contains("đã xác nhận")
-                    || st.contains("đang nén")
-                    || st.contains("giải mã")
-                    || st.contains("Đã nhận gói đồng bộ")
-                    || st.contains("thành công")
-                {
-                    confirmed = true;
-                    on_progress(0.40, st.clone());
-                    break;
-                } else if st.contains("từ chối") {
-                    on_progress(1.0, st.clone());
+        // Phase 1: ask the phone for every conversation, one partition each, as Zalo PC does
+        // (re-notes/70). The v1 `pull_mobile_msg` request is no longer sent alongside.
+        on_progress(0.05, "Đang chuẩn bị danh sách hội thoại…".to_string());
+        match crate::phone_sync_v2::build_plan(s, threads).await {
+            Ok(plan) if !plan.partitions.is_empty() => {
+                if !run_v2_plan(s, &plan, &mut on_progress).await {
+                    crate::phone_sync_v2::finish_all();
                     return Ok((0, 0));
-                } else {
-                    on_progress(0.20, st.clone());
                 }
             }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-
-        if confirmed {
-            let finish_deadline = std::time::Instant::now() + Duration::from_secs(45);
-            while std::time::Instant::now() < finish_deadline {
-                if let Some(ref st) = last_mobile_sync_status() {
-                    if st.contains("thành công") {
-                        on_progress(1.0, st.clone());
-                        break;
-                    } else if st.contains("Không thể") || st.contains("thất bại") {
-                        on_progress(1.0, st.clone());
-                        break;
-                    } else {
-                        on_progress(0.70, st.clone());
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(500)).await;
+            Ok(_) => {
+                crate::phone_sync_v2::log("plan: no conversation has a global id");
+                on_progress(0.2, "Không tìm thấy hội thoại nào để xin từ điện thoại.".to_string());
+            }
+            Err(error) => {
+                crate::phone_sync_v2::log(&format!("plan: failed ({error})"));
+                on_progress(0.2, format!("Chưa lập được danh sách hội thoại: {error}"));
             }
         }
     }
@@ -430,6 +395,18 @@ where
         Ok(n)
     })
     .await??;
+    // Phone batches were written straight to the store; bring them into the returned threads.
+    let hydrate_path = db_path.to_string();
+    let mut hydrated = threads.clone();
+    if let Ok(Ok(restored)) = tokio::task::spawn_blocking(move || -> Result<Vec<Thread>> {
+        MessageStore::open(&hydrate_path)?.hydrate_threads(&mut hydrated, 2000)?;
+        Ok(hydrated)
+    })
+    .await
+    {
+        *threads = restored;
+    }
+    crate::phone_sync_v2::finish_all();
     let after_total: usize = threads.iter().map(|t| t.messages.len()).sum();
     let added = db_added.max(after_total.saturating_sub(before_total));
     let active_threads = threads.iter().filter(|t| !t.messages.is_empty()).count();
@@ -440,6 +417,83 @@ where
     };
     on_progress(1.0, final_msg);
     Ok((added, active_threads))
+}
+
+/// Send the plan in chunks and wait for each chunk's batches. Returns false when the user
+/// cancelled or refused on the phone.
+async fn run_v2_plan<F>(s: &Session, plan: &crate::phone_sync_v2::SyncPlan, on_progress: &mut F) -> bool
+where
+    F: FnMut(f32, String),
+{
+    use crate::phone_sync_v2 as v2;
+    let senders = std::sync::Arc::new(plan.senders.clone());
+    let chunks: Vec<_> = plan.partitions.chunks(v2::PARTITIONS_PER_REQUEST).collect();
+    let total = chunks.len();
+    let mut answered = false;
+    on_progress(
+        0.08,
+        "📲 Đã gửi yêu cầu tới Zalo trên điện thoại. Mở Zalo trên điện thoại và bấm \"Đồng bộ ngay\".".to_string(),
+    );
+    for (index, chunk) in chunks.iter().enumerate() {
+        if PHONE_SYNC_CANCEL.load(Ordering::Relaxed) {
+            return false;
+        }
+        let sync_id = match v2::send_request(s, chunk, index as u32, senders.clone()) {
+            Ok(id) => id,
+            Err(error) => {
+                v2::log(&format!("request: failed ({error})"));
+                on_progress(0.2, format!("Chưa gửi được yêu cầu tới điện thoại: {error}"));
+                return true;
+            }
+        };
+        let started = std::time::Instant::now();
+        // Zalo PC waits up to 3 minutes for the phone to wake and the user to confirm; once the
+        // phone is answering, a request that brings nothing for a minute is given up.
+        let first_batch_wait = Duration::from_secs(if answered { 60 } else { 180 });
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if PHONE_SYNC_CANCEL.load(Ordering::Relaxed) {
+                return false;
+            }
+            if let Some(status) = last_mobile_sync_status() {
+                if status.contains("từ chối") {
+                    v2::log("status: rejected on phone");
+                    on_progress(1.0, status);
+                    return false;
+                }
+            }
+            match v2::request_state(&sync_id) {
+                Some(state) if state.batches > 0 => {
+                    answered = true;
+                    on_progress(
+                        0.1 + 0.6 * (index as f32 + 0.5) / total as f32,
+                        format!("📥 Đang nhận tin nhắn từ điện thoại ({}/{total})…", index + 1),
+                    );
+                    let idle = state.last_activity.map(|t| t.elapsed()).unwrap_or_default();
+                    if state.last_seen || idle > Duration::from_secs(20) {
+                        v2::log(&format!(
+                            "request: done sync={} batches={} imported={} last_seen={}",
+                            v2::short(&sync_id),
+                            state.batches,
+                            state.imported,
+                            state.last_seen
+                        ));
+                        break;
+                    }
+                }
+                _ if started.elapsed() > first_batch_wait => {
+                    v2::log(&format!("request: no batch sync={} after={}s", v2::short(&sync_id), first_batch_wait.as_secs()));
+                    if !answered {
+                        on_progress(0.2, "Điện thoại chưa gửi dữ liệu. Hãy mở Zalo trên điện thoại rồi thử lại.".to_string());
+                        return true;
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+    true
 }
 
 /// Download, decrypt, decompress and ingest a mobile backup container (.db.crypt)
@@ -844,6 +898,37 @@ fn run_sync_v2_helper(args: &[&std::ffi::OsStr]) -> Result<std::process::Output>
     let node = find_node().context("không tìm thấy Node.js (cần để đồng bộ v2 với điện thoại)")?;
     let script = find_sync_v2_helper().context("không tìm thấy sync_v2_helper.js")?;
     Ok(std::process::Command::new(node).arg(script).args(args).output()?)
+}
+
+/// Run the helper with its key and session files in `dir` (one folder per sync request).
+pub(crate) fn run_sync_v2_helper_in(dir: &std::path::Path, args: &[&std::ffi::OsStr]) -> Result<std::process::Output> {
+    let node = find_node().context("không tìm thấy Node.js (cần để đồng bộ v2 với điện thoại)")?;
+    let script = find_sync_v2_helper().context("không tìm thấy sync_v2_helper.js")?;
+    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    Ok(std::process::Command::new(node).arg(script).args(args).env("SYNC_V2_DIR", dir).output()?)
+}
+
+/// Generate a request's zproto key pair into `dir`.
+pub fn generate_sync_v2_keys_in(dir: &std::path::Path) -> Result<SyncV2Keys> {
+    let out = run_sync_v2_helper_in(dir, &["gen-keys".as_ref()])?;
+    if !out.status.success() {
+        anyhow::bail!("sync_v2_helper gen-keys failed");
+    }
+    Ok(serde_json::from_slice(&out.stdout)?)
+}
+
+/// Stored type and readable text for a phone message type (`MsgType` in mobile backups and
+/// Sync v2): 3 photo, 10 sticker, 12 link; anything else keeps its text.
+pub fn mobile_message_label(msg_type: i64, content: &str) -> (String, String) {
+    let text = content.trim();
+    let (kind, placeholder) = match msg_type {
+        3 => ("chat.photo", "[Hình ảnh]"),
+        10 => ("chat.sticker", "[Nhãn dán]"),
+        12 => ("chat.link", "[Liên kết]"),
+        _ => ("webchat", ""),
+    };
+    let text = if text.is_empty() || (kind != "webchat" && text.starts_with('{')) { placeholder } else { text };
+    (kind.to_string(), text.to_string())
 }
 
 pub fn generate_sync_v2_keys() -> Result<SyncV2Keys> {

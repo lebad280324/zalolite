@@ -53,6 +53,11 @@ function loadWasmBytes() {
     throw new Error('libzproto_wasm not found: install Zalo PC or set ZPROTO_WASM_PATH');
 }
 
+// Each sync request keeps its keys and session in its own folder (SYNC_V2_DIR), so parallel or
+// successive requests never overwrite each other's key material. Defaults to the working directory.
+const WORK_DIR = process.env.SYNC_V2_DIR || '.';
+const inWork = name => path.join(WORK_DIR, name);
+
 let wasmReady = false;
 
 async function initWasm() {
@@ -74,16 +79,16 @@ async function generateV2Keys() {
     };
     ik.free();
     ek.free();
-    fs.writeFileSync('sync_v2_keys.json', JSON.stringify(res, null, 2));
+    fs.writeFileSync(inWork('sync_v2_keys.json'), JSON.stringify(res, null, 2), { mode: 0o600 });
     return res;
 }
 
 async function decryptMeta(metaFilePath) {
     await initWasm();
-    if (!fs.existsSync('sync_v2_keys.json')) {
+    if (!fs.existsSync(inWork('sync_v2_keys.json'))) {
         throw new Error('sync_v2_keys.json not found');
     }
-    const keys = JSON.parse(fs.readFileSync('sync_v2_keys.json', 'utf8'));
+    const keys = JSON.parse(fs.readFileSync(inWork('sync_v2_keys.json'), 'utf8'));
     let metaBytes = fs.readFileSync(metaFilePath);
     
     // Strip 4-byte uint32 LE length header if present
@@ -103,7 +108,7 @@ async function decryptMeta(metaFilePath) {
     const plaintext = Buffer.from(res.plaintext);
     res.free();
 
-    fs.writeFileSync('sync_v2_session.bin', sessionRecord);
+    fs.writeFileSync(inWork('sync_v2_session.bin'), sessionRecord, { mode: 0o600 });
     return {
         sessionRecordHex: sessionRecord.toString('hex'),
         plainLen: plaintext.length
@@ -112,10 +117,10 @@ async function decryptMeta(metaFilePath) {
 
 async function decryptMessage(msgFilePath) {
     await initWasm();
-    if (!fs.existsSync('sync_v2_session.bin')) {
+    if (!fs.existsSync(inWork('sync_v2_session.bin'))) {
         throw new Error('sync_v2_session.bin not found');
     }
-    const sessionRecord = fs.readFileSync('sync_v2_session.bin');
+    const sessionRecord = fs.readFileSync(inWork('sync_v2_session.bin'));
     let msgBytes = fs.readFileSync(msgFilePath);
 
     // Strip 4-byte uint32 LE length header if present
@@ -130,10 +135,68 @@ async function decryptMessage(msgFilePath) {
     const plaintext = Buffer.from(res.plaintext);
     res.free();
 
-    fs.writeFileSync('sync_v2_message.bin', plaintext);
+    fs.writeFileSync(inWork('sync_v2_message.bin'), plaintext);
     return {
         plainLen: plaintext.length
     };
+}
+
+// A downloaded batch is a run of records, each `u32 LE length | ciphertext` (Zalo PC reads it
+// record by record). The first record of a session carries the metadata that establishes the
+// session; later records are messages decrypted with that session. Output is a run of
+// `u8 kind (1 = meta, 2 = message) | u32 LE length | plaintext` records.
+function splitRecords(bytes) {
+    const records = [];
+    let offset = 0;
+    while (offset + 4 <= bytes.length) {
+        const len = bytes.readUInt32LE(offset);
+        if (len === 0 || offset + 4 + len > bytes.length) break;
+        records.push(bytes.slice(offset + 4, offset + 4 + len));
+        offset += 4 + len;
+    }
+    // Not a record stream: treat the whole file as one ciphertext.
+    return offset === bytes.length && records.length ? records : [bytes];
+}
+
+async function decryptBatch(batchPath, outPath) {
+    await initWasm();
+    const keys = JSON.parse(fs.readFileSync(inWork('sync_v2_keys.json'), 'utf8'));
+    const ikPub = Buffer.from(keys.ik_pub, 'base64');
+    const ikPriv = Buffer.from(keys.ik_priv, 'hex');
+    const ekPriv = Buffer.from(keys.ek_priv, 'hex');
+    const sessionPath = inWork('sync_v2_session.bin');
+    const out = [];
+    let meta = 0, messages = 0, failed = 0;
+    const push = (kind, plain) => {
+        const head = Buffer.alloc(5);
+        head.writeUInt8(kind, 0);
+        head.writeUInt32LE(plain.length, 1);
+        out.push(head, plain);
+    };
+    const tryMeta = record => {
+        const res = zproto.j(record, ikPub, ikPriv, ekPriv, null);
+        const session = Buffer.from(res.sessionRecord);
+        const plain = Buffer.from(res.plaintext);
+        res.free();
+        fs.writeFileSync(sessionPath, session, { mode: 0o600 });
+        push(1, plain); meta++;
+    };
+    const tryMessage = record => {
+        const res = zproto.i(record, fs.readFileSync(sessionPath));
+        const plain = Buffer.from(res.plaintext);
+        res.free();
+        push(2, plain); messages++;
+    };
+    for (const record of splitRecords(fs.readFileSync(batchPath))) {
+        const order = fs.existsSync(sessionPath) ? [tryMessage, tryMeta] : [tryMeta, tryMessage];
+        let done = false;
+        for (const attempt of order) {
+            try { attempt(record); done = true; break; } catch (_) { /* try the other kind */ }
+        }
+        if (!done) failed++;
+    }
+    fs.writeFileSync(outPath, Buffer.concat(out));
+    return { meta, messages, failed };
 }
 
 const cmd = process.argv[2];
@@ -154,6 +217,14 @@ if (cmd === 'gen-keys') {
         console.error(e);
         process.exit(1);
     });
+} else if (cmd === 'decrypt-batch') {
+    decryptBatch(process.argv[3], process.argv[4]).then(res => {
+        console.log(JSON.stringify(res));
+        process.exit(0);
+    }).catch(e => {
+        console.error(String(e && e.message || e));
+        process.exit(1);
+    });
 } else if (cmd === 'decrypt-message') {
     const msgPath = process.argv[3];
     decryptMessage(msgPath).then(res => {
@@ -165,4 +236,4 @@ if (cmd === 'gen-keys') {
     });
 }
 
-module.exports = { generateV2Keys, decryptMeta, decryptMessage, initWasm, zproto };
+module.exports = { generateV2Keys, decryptMeta, decryptMessage, decryptBatch, splitRecords, initWasm, zproto };

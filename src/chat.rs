@@ -1313,6 +1313,42 @@ pub async fn get_friends(s: &Session) -> Result<Vec<Thread>> {
     Ok(threads)
 }
 
+/// Map each friend's `userId` to the `globalId` the phone uses for its sync partitions
+/// (`oneone/<globalId>`, re-notes/70). Same `getfriends` request as [`get_friends`].
+pub async fn get_friend_global_ids(s: &Session) -> Result<std::collections::HashMap<String, String>> {
+    if s.login.is_none() {
+        anyhow::bail!("chưa đăng nhập");
+    }
+    let body = obj(&[
+        ("incInvalid", json!(1)),
+        ("page", json!(1)),
+        ("count", json!(20000)),
+        ("avatar_size", json!(160)),
+        ("actiontime", json!(0)),
+        ("imei", json!(s.imei)),
+    ]);
+    let params = s.encoded_params(&body)?;
+    let path = format!("/api/social/friend/getfriends?{}&params={params}", s.common_params());
+    let raw = s.get_endpoint("friend", &path).await.context("không tải được danh sách bạn bè")?;
+    let resp = s.maybe_decrypt(raw, s.session_key_bytes()).await;
+    Ok(friend_global_ids(&resp))
+}
+
+/// `userId → globalId` from a decoded `getfriends` response.
+pub fn friend_global_ids(resp: &Value) -> std::collections::HashMap<String, String> {
+    let root = resp.get("data").unwrap_or(resp);
+    let items = match root {
+        Value::Array(items) => items.as_slice(),
+        Value::Object(o) => o.get("friends").or_else(|| o.get("data")).and_then(Value::as_array).map_or(&[][..], Vec::as_slice),
+        _ => &[],
+    };
+    items
+        .iter()
+        .filter_map(|it| Some((pick_str(it, &["userId"])?, pick_str(it, &["globalId"])?)))
+        .filter(|(uid, gid)| !uid.is_empty() && !gid.is_empty())
+        .collect()
+}
+
 fn parse_thread(v: &Value) -> Option<Thread> {
     let id = pick_str(v, &["userId", "uid", "id", "friendId", "globalId"])?;
     let name = pick_str(v, &["displayName", "zaloName", "display_name", "name"])
@@ -7076,6 +7112,21 @@ pub enum MobileSyncControlEvent {
     },
 }
 
+impl MobileSyncControlEvent {
+    /// Short name for diagnostics; never includes URLs or keys.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::TransferAfterLogin { .. } => "transfer_after_login",
+            Self::WaitingConfirmOnPhone { .. } => "waiting_confirm_on_phone",
+            Self::UserConfirmed => "user_confirmed",
+            Self::UserRejected => "user_rejected",
+            Self::MobileBusyRestoring => "mobile_busy_restoring",
+            Self::BackupReady { .. } => "backup_ready",
+            Self::SyncV2Batch { .. } => "sync_v2_batch",
+        }
+    }
+}
+
 /// Extract `transfer_msg` / `syncmsgmb` / `transfer_sync2` events from a control payload.
 pub fn extract_mobile_sync_controls(data_node: &Value) -> Vec<MobileSyncControlEvent> {
     let mut out = Vec::new();
@@ -7109,6 +7160,12 @@ pub fn extract_mobile_sync_controls(data_node: &Value) -> Vec<MobileSyncControlE
             Some(v) => v.clone(),
             None => Value::Null,
         };
+        if act_type == "transfer_sync2" {
+            // Field names and status codes only: the payload carries download URLs.
+            let fields: Vec<&str> = parsed_data.as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
+            let status = parsed_data.get("status").map(|v| v.to_string()).unwrap_or_default();
+            crate::phone_sync_v2::log(&format!("control: act={act} status={status} fields={fields:?}"));
+        }
         match act {
             "transfer_after_login" => {
                 if let Some(tk) = parsed_data

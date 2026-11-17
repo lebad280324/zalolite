@@ -167,6 +167,7 @@ impl PlatformState {
         self.sync_until = None;
         crate::history_sync::clear_sync_keys();
         crate::history_sync::set_last_mobile_sync_status(None);
+        crate::phone_sync_v2::finish_all();
     }
 
     /// Execute a platform intent using only the current session and explicitly owned store.
@@ -350,6 +351,9 @@ impl PlatformState {
         }
         for control in chat::extract_mobile_sync_controls(data) {
             use chat::MobileSyncControlEvent::*;
+            if !matches!(control, SyncV2Batch { .. }) {
+                crate::phone_sync_v2::log(&format!("event: {}", control.kind()));
+            }
             match control {
                 TransferAfterLogin { temp_key } => {
                     crate::history_sync::set_latest_mobile_temp_key(&temp_key)
@@ -378,18 +382,75 @@ impl PlatformState {
                     0,
                 ),
                 SyncV2Batch {
-                    url, batch_type, ..
-                } => self.import_batch(
-                    session,
-                    threads,
-                    db_path,
-                    output.clone(),
-                    url,
-                    None,
-                    batch_type,
-                ),
+                    url, sync_id, batch_type, is_last,
+                } => {
+                    crate::phone_sync_v2::log(&format!(
+                        "event: upload_batch sync={} type={batch_type} last={is_last} host={}",
+                        crate::phone_sync_v2::short(&sync_id),
+                        crate::phone_sync_v2::host(&url)
+                    ));
+                    self.import_v2_batch(session, threads, db_path, output.clone(), url, sync_id, is_last)
+                }
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn import_v2_batch(
+        &mut self,
+        session: &Session,
+        threads: &[Thread],
+        db_path: &str,
+        output: mpsc::Sender<Value>,
+        url: String,
+        sync_id: String,
+        is_last: bool,
+    ) {
+        // Ignore unsolicited batches when the user has not started a sync.
+        if self.sync_until.map_or(true, |deadline| Instant::now() >= deadline) || self.received_batches.contains(&url) {
+            return;
+        }
+        let Ok(parsed) = reqwest::Url::parse(&url) else { return };
+        let Some(host) = parsed.host_str() else { return };
+        if parsed.scheme() != "https"
+            || !crate::endpoints::MOBILE_BACKUP_DOMAINS.iter().any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+        {
+            crate::phone_sync_v2::log(&format!("event: batch rejected host={host}"));
+            return;
+        }
+        if self.received_batches.len() >= 4096 {
+            return;
+        }
+        self.received_batches.insert(url.clone());
+        let session = session.clone();
+        let path = db_path.to_string();
+        let mut snapshot = threads.to_vec();
+        let updates = self.updates.clone();
+        let Ok(account) = account(&session) else { return };
+        self.imports.retain(|task| !task.is_finished());
+        let import_lock = self.import_lock.clone();
+        self.imports.push(tokio::spawn(async move {
+            let _import_guard = import_lock.lock().await;
+            match crate::phone_sync_v2::import_batch(&session, &sync_id, &url, is_last, &path).await {
+                Ok(outcome) if outcome.imported > 0 => {
+                    let target = path.clone();
+                    if let Ok(Ok(restored)) = tokio::task::spawn_blocking(move || -> Result<_> {
+                        MessageStore::open(&target)?.hydrate_threads(&mut snapshot, 2000)?;
+                        Ok(snapshot)
+                    })
+                    .await
+                    {
+                        let _ = updates.send(PlatformUpdate::Threads { account, threads: restored });
+                    }
+                    emit(&output, "sync_progress", json!({"progress":0.6,"message":format!("Đã nhận {} tin nhắn từ điện thoại", outcome.imported)}));
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    crate::phone_sync_v2::log(&format!("batch: failed ({error})"));
+                    emit(&output, "sync_progress", json!({"progress":0.5,"message":"Chưa giải mã được một gói đồng bộ. Dữ liệu đã lưu vẫn được giữ."}));
+                }
+            }
+        }));
     }
 
     fn import_batch(

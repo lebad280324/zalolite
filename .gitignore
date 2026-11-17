@@ -97,3 +97,11 @@ Thumbs.db
 
 # Also ignore a locally shared target-cache symlink.
 /target
+
+# Phone sync v2 working folders (keys, sessions) and diagnostics
+sync_v2/
+phone_sync.log
+phone_sync.log.1
+sync_v2_keys.json
+sync_v2_session.bin
+sync_v2_message.bin
