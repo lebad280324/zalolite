@@ -884,6 +884,23 @@ struct PollResult {
 }
 
 impl Core {
+    /// Drop messages hidden by a delete-for-me from another device: SQLite and the open transcript.
+    async fn forget_removed(&self, removed: Vec<(String, String)>) -> Result<()> {
+        if removed.is_empty() {
+            return Ok(());
+        }
+        if !self.demo && !self.db_path.is_empty() {
+            let db_path = self.db_path.clone();
+            let rows = removed.clone();
+            tokio::task::spawn_blocking(move || MessageStore::open(&db_path)?.delete_thread_messages(&rows))
+                .await??;
+        }
+        for (thread_id, message_id) in removed {
+            emit(&self.output, event("message_removed", json!({"thread_id": thread_id, "message_id": message_id}))).await?;
+        }
+        Ok(())
+    }
+
     fn new(demo: bool, output: mpsc::Sender<Value>) -> Result<Self> {
         let (platform, updates) = platform::PlatformState::new();
         Ok(Self {
@@ -1136,8 +1153,11 @@ impl Core {
                     Vec::new()
                 };
                 if !db_path.is_empty() {
-                    MessageStore::open(&db_path)?
-                        .hydrate_threads(&mut threads, MessageStore::PRELOAD_MSGS)?;
+                    let mut store = MessageStore::open(&db_path)?;
+                    // Older builds cached delete-for-me events as empty messages.
+                    let stale = chat::purge_local_delete_events(&mut threads);
+                    store.delete_thread_messages(&stale)?;
+                    store.hydrate_threads(&mut threads, MessageStore::PRELOAD_MSGS)?;
                 }
                 Ok((session, threads, db_path, cache_path))
             })
@@ -1229,7 +1249,8 @@ impl Core {
         }
         if let Ok(response) = chat::get_last_msgs(&self.session, &[]).await {
             check_response(&response)?;
-            chat::merge_previews(&mut self.threads, &response);
+            let removed = chat::merge_previews(&mut self.threads, &response);
+            self.forget_removed(removed).await?;
             succeeded = true;
         }
         if !succeeded {
@@ -1364,7 +1385,8 @@ impl Core {
             } else {
                 let response = chat::get_last_msgs(&self.session, &[thread_id.to_owned()]).await?;
                 check_response(&response)?;
-                chat::merge_previews(&mut self.threads, &response);
+                let removed = chat::merge_previews(&mut self.threads, &response);
+                self.forget_removed(removed).await?;
             }
             self.persist_best_effort().await?;
         }
@@ -1959,7 +1981,8 @@ impl Core {
             self.output.clone(),
             self.demo,
         );
-        chat::merge_live_previews(&mut self.threads, &response);
+        let removed = chat::merge_live_previews(&mut self.threads, &response);
+        self.forget_removed(removed).await?;
         self.persist_best_effort().await?;
         self.publish().await
     }
@@ -2416,7 +2439,8 @@ pub async fn run_stdio(demo: bool) -> Result<()> {
                             core.publish().await?;
                         }
                         if ws_event.is_chat_ish() {
-                            chat::merge_live_previews(&mut core.threads, &ws_event.payload);
+                            let removed = chat::merge_live_previews(&mut core.threads, &ws_event.payload);
+                            core.forget_removed(removed).await?;
                             core.publish().await?;
                             live_unsaved = true;
                         }

@@ -543,7 +543,9 @@ impl<'a> TuiApp<'a> {
                 let mut list = chat::get_friends(&session).await?;
                 let ids: Vec<String> = list.iter().map(|t| t.id.clone()).collect();
                 match chat::get_last_msgs(&session, &ids).await {
-                    Ok(resp) => chat::merge_previews(&mut list, &resp),
+                    Ok(resp) => {
+                        chat::merge_previews(&mut list, &resp);
+                    }
                     Err(e) => logger::log_error("tui::refresh::get_last_msgs", &e.to_string()),
                 }
                 if let Ok(mute_resp) = chat::get_mute_conversations(&session).await {

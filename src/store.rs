@@ -211,6 +211,17 @@ impl MessageStore {
         Ok(())
     }
 
+    /// Delete the given messages of one conversation, matching the stored message ID.
+    pub fn delete_thread_messages(&mut self, rows: &[(String, String)]) -> Result<()> {
+        for (thread_id, msg_id) in rows {
+            self.conn.execute(
+                "DELETE FROM messages WHERE thread_id = ?1 AND msg_id = ?2",
+                params![thread_id, msg_id],
+            )?;
+        }
+        Ok(())
+    }
+
     /// Delete an entire conversation and all its messages from local SQLite store (#24).
     pub fn delete_thread(&mut self, thread_id: &str) -> Result<()> {
         if thread_id.is_empty() {

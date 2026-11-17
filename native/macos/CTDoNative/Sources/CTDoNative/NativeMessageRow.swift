@@ -309,9 +309,11 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
         }
         if message.text.isEmpty && message.imageURL == nil && message.fileURL == nil {
             gap()
-            let block = RowText.block("Loại tin này chưa hiển thị được — xem trên điện thoại", .label, width: inner, maxLines: 1)
+            // The time sits after the label, as for a caption, so the two never overlap.
+            let block = RowText.block("Loại tin này chưa hiển thị được — xem trên điện thoại", .label, width: inner - 7 - stampWidth, maxLines: 2)
             texts.append(.init(block: block, origin: CGPoint(x: 0, y: cy), tone: .secondary, moves: true))
-            cy += block.size.height; cw = max(cw, block.size.width)
+            if stampOrigin == nil { stampOrigin = CGPoint(x: block.size.width + 7, y: cy + block.lastBaseline - stamp.firstBaseline) }
+            cy += block.size.height; cw = max(cw, block.size.width + 7 + stampWidth)
         }
         if !bare && stampOrigin == nil { cw = max(cw, stampWidth - 4) }
 

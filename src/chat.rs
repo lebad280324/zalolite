@@ -5328,6 +5328,9 @@ pub fn call_text(duration: i64, video: bool, missed: bool, outgoing: bool) -> St
 }
 
 fn parse_chat_message(it: &Value) -> Option<ChatMessage> {
+    if local_delete_targets(it).is_some() {
+        return None;
+    }
     let msg_type = normalize_msg_type(it);
 
     let raw_content_val = it
@@ -5755,17 +5758,81 @@ fn extract_message_thread_id_ext(
 }
 
 /// Fold a `get-last-msgs` or `getChatFromPolling` response into thread previews and conversation messages.
-pub fn merge_previews(threads: &mut Vec<Thread>, resp: &Value) {
-    merge_preview_batch(threads, resp, false);
+pub fn merge_previews(threads: &mut Vec<Thread>, resp: &Value) -> Vec<(String, String)> {
+    merge_preview_batch(threads, resp, false)
 }
 
 /// Merge a live push/poll batch, counting only newly inserted incoming messages as unread.
 /// History loads must continue to use `merge_previews`.
-pub fn merge_live_previews(threads: &mut Vec<Thread>, resp: &Value) {
-    merge_preview_batch(threads, resp, true);
+/// Messages hidden by a "delete for me" made on another device.
+///
+/// Zalo PC receives these as `msgType: "chat.delete"` with `content` listing
+/// `{globalDelMsgId, clientDelMsgId}` (re-notes/69_delete_for_me_events.md).
+/// They are control events, not messages, so they are never shown as bubbles.
+pub fn local_delete_targets(item: &Value) -> Option<Vec<String>> {
+    let kind = item.get("msgType").or_else(|| item.get("msg_type")).and_then(Value::as_str)?;
+    if kind != "chat.delete" {
+        return None;
+    }
+    let content = item.get("content").or_else(|| item.get("message"));
+    let parsed = content
+        .and_then(Value::as_str)
+        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok());
+    let content = parsed.as_ref().or(content);
+    let entries = match content {
+        Some(Value::Array(entries)) => entries.iter().collect::<Vec<_>>(),
+        Some(entry @ Value::Object(_)) => vec![entry],
+        _ => Vec::new(),
+    };
+    let mut ids = Vec::new();
+    for entry in entries {
+        for key in ["globalDelMsgId", "clientDelMsgId"] {
+            if let Some(id) = wire_identity(entry.get(key)).filter(|id| !id.is_empty() && id != "0") {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+    Some(ids)
 }
 
-fn merge_preview_batch(threads: &mut Vec<Thread>, resp: &Value, live: bool) {
+/// Drop the messages a delete-for-me event names; returns the IDs to remove from storage.
+fn remove_delete_targets(messages: &mut Vec<ChatMessage>, targets: &[String]) {
+    messages.retain(|message| {
+        !targets.iter().any(|id| *id == message.id || *id == message.client_message_id)
+    });
+}
+
+/// Apply delete-for-me events that were cached as messages by older builds,
+/// returning `(thread_id, msg_id)` rows to delete from SQLite.
+pub fn purge_local_delete_events(threads: &mut [Thread]) -> Vec<(String, String)> {
+    let mut removed = Vec::new();
+    for thread in threads.iter_mut() {
+        let mut targets = Vec::new();
+        for message in &thread.messages {
+            let fields = Value::Object(message.wire_ref.fields.clone().into_iter().collect());
+            if let Some(ids) = local_delete_targets(&fields) {
+                targets.push(message.id.clone());
+                targets.extend(ids);
+            }
+        }
+        if targets.is_empty() {
+            continue;
+        }
+        remove_delete_targets(&mut thread.messages, &targets);
+        removed.extend(targets.into_iter().map(|id| (thread.id.clone(), id)));
+    }
+    removed
+}
+
+/// Merge a live push; returns `(thread_id, msg_id)` rows removed by delete-for-me events.
+pub fn merge_live_previews(threads: &mut Vec<Thread>, resp: &Value) -> Vec<(String, String)> {
+    merge_preview_batch(threads, resp, true)
+}
+
+fn merge_preview_batch(threads: &mut Vec<Thread>, resp: &Value, live: bool) -> Vec<(String, String)> {
+    let mut removed: Vec<(String, String)> = Vec::new();
     let mut entries: Vec<(&Value, bool)> = Vec::new();
     let parsed_str_data: Option<Value> = resp
         .get("data")
@@ -5867,6 +5934,22 @@ fn merge_preview_batch(threads: &mut Vec<Thread>, resp: &Value, live: bool) {
         }
 
         for (m_val, is_grp) in raw_msgs {
+            if let Some(targets) = local_delete_targets(m_val) {
+                if let Some((tid, _)) =
+                    extract_message_thread_id_ext(entry, m_val, is_grp, cloud_tid.as_deref())
+                {
+                    if let Some(index) = threads.iter().position(|thread| thread.id == tid) {
+                        remove_delete_targets(&mut threads[index].messages, &targets);
+                        let mut identities = MessageIdentityIndex::default();
+                        for (row, message) in threads[index].messages.iter().enumerate() {
+                            identities.insert(message, row);
+                        }
+                        message_indices[index] = identities;
+                    }
+                    removed.extend(targets.into_iter().map(|id| (tid.clone(), id)));
+                }
+                continue;
+            }
             let Some(parsed) = parse_chat_message(m_val) else {
                 continue;
             };
@@ -5981,6 +6064,7 @@ fn merge_preview_batch(threads: &mut Vec<Thread>, resp: &Value, live: bool) {
             }
         }
     }
+    removed
 }
 
 /// Merge group history response into a thread's messages, sorted by timestamp and deduplicated by msg_id.
@@ -8518,5 +8602,59 @@ mod rich_card_tests {
         let message = parse_chat_message(&json!({"msgId":"1","uidFrom":"7","ts":1,"msgType":"chat.list","content":list})).unwrap();
         assert_eq!(message.text, "Bài viết");
         assert_eq!(message.link_url.as_deref(), Some("https://example.com/a"));
+    }
+}
+
+#[cfg(test)]
+mod delete_for_me_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn thread_with(messages: Vec<ChatMessage>) -> Thread {
+        Thread {
+            id: "u1".into(),
+            name: "u1".into(),
+            messages,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn delete_for_me_from_phone_hides_target_and_is_not_a_bubble() {
+        let mut threads = vec![thread_with(vec![ChatMessage {
+            id: "8495053541666".into(),
+            client_message_id: "1794820425789".into(),
+            text: "tin cũ".into(),
+            ts: 1_794_820_425_789,
+            ..Default::default()
+        }])];
+        let push = json!({"data":{"msgs":[{
+            "msgId":"8495060000000","cliMsgId":"1794821055000","msgType":"chat.delete",
+            "uidFrom":"0","idTo":"u1","ts":"1794821055000",
+            "content":[{"globalDelMsgId":8495053541666_i64,"clientDelMsgId":1794820425789_i64,"type":2}]
+        }]}});
+        let removed = merge_live_previews(&mut threads, &push);
+        assert!(threads[0].messages.is_empty());
+        assert!(removed.contains(&("u1".to_string(), "8495053541666".to_string())));
+        assert!(removed.contains(&("u1".to_string(), "1794820425789".to_string())));
+    }
+
+    #[test]
+    fn cached_delete_events_are_purged_with_their_targets() {
+        let event = ChatMessage {
+            id: "8495060000000".into(),
+            wire_ref: crate::message_model::WireMessageRef::from_raw(&json!({
+                "msgType":"chat.delete",
+                "content":[{"globalDelMsgId":"8495053541666","clientDelMsgId":"0"}]
+            })),
+            ..Default::default()
+        };
+        let kept = ChatMessage { id: "1".into(), text: "giữ".into(), ..Default::default() };
+        let target = ChatMessage { id: "8495053541666".into(), text: "xóa".into(), ..Default::default() };
+        let mut threads = vec![thread_with(vec![kept, target, event])];
+        let removed = purge_local_delete_events(&mut threads);
+        let ids: Vec<&str> = threads[0].messages.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["1"]);
+        assert_eq!(removed.len(), 2);
     }
 }
