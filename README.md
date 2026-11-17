@@ -23,9 +23,9 @@ Không Electron, không Chromium, không Node.js.
 
 <br>
 
-<img src="docs/screenshots/main.jpg" alt="Cửa sổ chính Zalolite: danh sách hội thoại, khung trò chuyện, menu tài khoản và thông tin hội thoại" width="900">
+<img src="docs/screenshots/main.jpg" alt="Cửa sổ chính Zalolite: danh sách hội thoại, khung trò chuyện với hình nền riêng và thẻ cuộc gọi" width="900">
 
-<sub>Ảnh chụp trên macOS 26 với Liquid Glass. Tên, ảnh đại diện và nội dung tin nhắn đã được làm mờ.</sub>
+<sub>Ảnh chụp trên macOS 26 với Liquid Glass và hình nền cuộc trò chuyện tự chọn.</sub>
 
 </div>
 
@@ -41,12 +41,33 @@ Không Electron, không Chromium, không Node.js.
 | 🔒 **Riêng tư** | Session, khóa và lịch sử chỉ nằm trên máy bạn. Không máy chủ trung gian, không thu thập dữ liệu. |
 | 🗂️ **Mang lịch sử theo** | Nhập bản sao lưu Zalo PC (`.zl.zip`), đồng bộ tin nhắn từ điện thoại. |
 
+## Điểm nổi bật so với Zalo PC
+
+So sánh với Zalo PC 26.11.10 cho macOS, đo trên cùng một máy Apple Silicon.
+
+| | Zalolite | Zalo PC |
+| :--- | :--- | :--- |
+| Công nghệ | SwiftUI/AppKit native + lõi Rust | Electron (Chromium + Node.js) |
+| Dung lượng sau cài đặt | **≈ 35 MB** (bộ cài ≈ 13 MB) | ≈ 766 MB |
+| Giao diện | Liquid Glass của macOS 26, theo chế độ sáng/tối của hệ thống | Giao diện web dùng chung cho Windows và macOS |
+| Mở hội thoại ẩn | **Touch ID** hoặc mật khẩu máy | Mã PIN riêng |
+
+**Trải nghiệm riêng của Zalolite**
+
+- 🎨 **Hình nền cho cuộc trò chuyện** — bảng màu có sẵn, ảnh đại diện làm mờ hoặc ảnh của bạn, kèm thanh làm dịu ảnh để chữ luôn dễ đọc.
+- 👥 **Nhiều tài khoản trong một cửa sổ** — chuyển tài khoản ngay từ nút ảnh đại diện trên thanh công cụ, dữ liệu tách riêng từng tài khoản.
+- 🔎 **Tìm trong hội thoại rõ ràng** — đếm `n/N`, nhảy qua lại bằng Enter / ⇧Enter, tô vàng từ khóa ngay trong bong bóng.
+- 📞 **Thẻ cuộc gọi gọn** — loại cuộc gọi, thời lượng hoặc lý do (không trả lời, từ chối) và nút Gọi lại trong cùng một thẻ.
+- 🗄️ **Lịch sử thuộc về bạn** — lưu SQLite trên máy, nhập được bản sao lưu `.zl.zip` của Zalo PC, xuất dữ liệu khi cần.
+
+<sub>Zalolite chưa thay thế đầy đủ Zalo PC; xem <a href="docs/BA_FEATURE_COVERAGE.md">phạm vi chức năng</a>.</sub>
+
 ## Ảnh giao diện
 
 <table>
   <tr>
+    <td width="50%"><img src="docs/screenshots/info.jpg" alt="Thông tin hội thoại và menu chuyển tài khoản"><br><sub><b>Thông tin hội thoại &amp; nhiều tài khoản</b> — tác vụ nhanh, nhắc hẹn, ảnh/video; chuyển tài khoản từ thanh công cụ</sub></td>
     <td width="50%"><img src="docs/screenshots/settings.jpg" alt="Cài đặt giao diện: chế độ màu và hình nền cuộc trò chuyện"><br><sub><b>Giao diện</b> — chế độ sáng/tối, hình nền có sẵn hoặc ảnh của bạn</sub></td>
-    <td width="50%"><img src="docs/screenshots/accounts.jpg" alt="Cài đặt tài khoản: nhiều tài khoản trên một máy"><br><sub><b>Tài khoản &amp; khóa</b> — nhiều tài khoản, chuyển nhanh, khóa ứng dụng</sub></td>
   </tr>
 </table>
 
