@@ -56,6 +56,8 @@ h1 span { display: block; }
 .download svg { width: 22px; height: 22px; flex: none; }
 .download small { display: block; font-weight: 400; font-size: 11px; opacity: .9; }
 .meta { display: flex; flex-direction: column; align-items: center; gap: 3px; margin: 15px 0 18px; font-size: 11px; color: var(--ink-soft); }
+.legacy { display: block; text-align: center; margin: -8px 0 14px; font-size: 11.5px; color: var(--ink-soft); text-decoration: none; }
+.legacy span { color: var(--blue); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .source { display: block; text-align: center; padding-top: 15px; border-top: 1px solid var(--line); font-size: 12px; font-weight: 500; text-decoration: none; }
 .shot-frame { margin: 46px 0 0; padding: 12px 12px 0; background: color-mix(in srgb, var(--paper) 50%, transparent); border: 1px solid var(--line); border-radius: 24px; }
 .shot-hero { width: 100%; border-radius: 14px; box-shadow: var(--shadow); }
