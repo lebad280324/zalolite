@@ -125,6 +125,11 @@ footer { border-top: 1px solid var(--line); padding-block: 30px; font-size: 11px
 .ai-points li::before { content: ""; position: absolute; left: 4px; top: .62em; width: 9px; height: 9px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 16%, transparent); }
 .ai-points b { color: var(--ink); font-weight: 600; }
 .ai-link { font-weight: 600; font-size: 14px; }
+.ai-shots { display: grid; gap: 22px; }
+.ai-shot { margin: 0; }
+.ai-shot img { width: 100%; border-radius: 16px; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--paper); }
+.ai-shot figcaption { margin-top: 10px; color: var(--ink-soft); font-size: 13px; }
+.ai-shot figcaption b { color: var(--ink); font-weight: 600; }
 .ai-demo { margin: 0; }
 .ai-window { background: var(--paper); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden; }
 .ai-bar { display: flex; align-items: center; gap: 7px; padding: 13px 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--ink-soft); }
