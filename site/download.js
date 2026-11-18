@@ -34,7 +34,7 @@
     versionLabel.textContent = `Phiên bản ${String(release.tag_name).replace(/^v/i, '')}`;
   } catch (_) {
     // The verified static DMG remains available if the API times out or is rate-limited.
-    versionLabel.textContent = 'Bản 0.0.12 · Có thể có bản mới trên GitHub';
+    versionLabel.textContent = 'Bản 0.0.15 · Có thể có bản mới trên GitHub';
   } finally {
     clearTimeout(timeout);
   }
