@@ -153,7 +153,9 @@ struct SavedWorkspace: View {
 struct ThreadManagementMenu: View {
  @EnvironmentObject var store: AppStore
  let thread: ThreadSnapshot
+ @ObservedObject private var bridge = AIBridgeSettings.shared
  var body: some View {
+  if bridge.enabled && !store.demo { Button(bridge.isShared(thread) ? "Ngừng chia sẻ với trợ lý AI" : "Chia sẻ với trợ lý AI", systemImage: "sparkles") { bridge.toggle(thread) } }
   if store.supports("set_thread_priority") { let priority = store.isPriority(thread); Button(priority ? "Chuyển sang mục Khác" : "Đưa vào Ưu tiên", systemImage: priority ? "tray" : "star") { store.featureThread("set_thread_priority", thread: thread, values: ["priority": .bool(!priority)]) } }
   if !thread.isGroup && store.supports("update_alias") { Button("Đặt tên gợi nhớ…", systemImage: "pencil") { store.aliasThread = thread } }
   if store.supports("set_thread_category") { Button("Phân loại…", systemImage: "tag") { store.threadOptions = thread } }

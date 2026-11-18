@@ -103,6 +103,10 @@ So sánh với Zalo PC 26.11.10 cho macOS, đo trên cùng một máy Apple Sili
 > (ví dụ cuộc gọi video). Xem [phạm vi chức năng](docs/BA_FEATURE_COVERAGE.md) và [ghi chú phát hành](docs/releases/v0.0.12.md)
 > để biết giới hạn hiện tại.
 
+### 🤖 Trợ lý AI
+- Cho Codex, Claude Code hoặc Claude Desktop trên máy **đọc những hội thoại bạn chọn** rồi hỏi, ví dụ "liệt kê việc tôi đã nhận mà chưa xong trong nhóm Kinh doanh 3 ngày qua".
+- Tắt theo mặc định, chỉ đọc, không gửi được tin nhắn; tắt là dừng ngay. Xem [hướng dẫn cài đặt Trợ lý AI](docs/TRO_LY_AI.md).
+
 ## Cài đặt
 
 **Yêu cầu:** macOS 14 Sonoma trở lên, trên Mac Apple Silicon (M1 trở lên) hoặc Mac Intel. Một gói Universal chạy

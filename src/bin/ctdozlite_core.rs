@@ -26,8 +26,20 @@ fn main() {
     let demo = args.iter().any(|arg| arg == "--demo");
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         eprintln!(
-            "ctdozlite-core --data-dir <thư mục> [--demo]\nCầu nối JSON-lines cho giao diện macOS."
+            "ctdozlite-core --data-dir <thư mục> [--demo]\nCầu nối JSON-lines cho giao diện macOS.\nctdozlite-core --mcp [--data-dir <thư mục>]\nCầu nối MCP chỉ đọc cho trợ lý AI."
         );
+        return;
+    }
+    // `--mcp`: read-only bridge for a local AI assistant. It never takes the worker lock, so it
+    // runs beside the open app, and it only reads the conversations shared in ai_bridge.json.
+    if args.iter().any(|arg| arg == "--mcp") {
+        let Ok(directory) = zalo_rust::data_dir::initialize(&args) else {
+            eprintln!("Không mở được thư mục dữ liệu của Zalolite.");
+            std::process::exit(2);
+        };
+        if zalo_rust::ai_bridge::run_stdio(&directory).is_err() {
+            std::process::exit(1);
+        }
         return;
     }
     if !demo {

@@ -4,18 +4,18 @@ import UniformTypeIdentifiers
 import NativeBridge
 
 private enum SettingsPage: String, CaseIterable, Identifiable {
- case general = "Chung", updates = "Cập nhật phần mềm", security = "Tài khoản & khóa", privacy = "Quyền riêng tư", sync = "Đồng bộ & sao lưu", storage = "Dung lượng", appearance = "Giao diện", notifications = "Thông báo", messages = "Tin nhắn", calls = "Cuộc gọi", utilities = "Tiện ích"
+ case general = "Chung", updates = "Cập nhật phần mềm", security = "Tài khoản & khóa", privacy = "Quyền riêng tư", sync = "Đồng bộ & sao lưu", storage = "Dung lượng", appearance = "Giao diện", notifications = "Thông báo", messages = "Tin nhắn", calls = "Cuộc gọi", utilities = "Tiện ích", ai = "Trợ lý AI"
  var id: String { rawValue }
  /// Stable key used by deep links from the workspace.
  var key: String {
-  switch self { case .general: return "general"; case .updates: return "updates"; case .security: return "security"; case .privacy: return "privacy"; case .sync: return "sync"; case .storage: return "storage"; case .appearance: return "appearance"; case .notifications: return "notifications"; case .messages: return "messages"; case .calls: return "calls"; case .utilities: return "utilities" }
+  switch self { case .general: return "general"; case .updates: return "updates"; case .security: return "security"; case .privacy: return "privacy"; case .sync: return "sync"; case .storage: return "storage"; case .appearance: return "appearance"; case .notifications: return "notifications"; case .messages: return "messages"; case .calls: return "calls"; case .utilities: return "utilities"; case .ai: return "ai" }
  }
  /// Individual options on the page, so search finds a setting and not only a page title.
  var keywords: [String] {
   switch self {
   case .general: return ["Ngôn ngữ", "Mở khi đăng nhập macOS", "Ghi nhớ tài khoản", "Kết nối lại"]
   case .updates: return ["Phiên bản", "Kiểm tra cập nhật", "Tự động kiểm tra", "Bản mới"]
-  case .security: return ["Khóa ứng dụng", "Phím tắt khóa", "Bảo mật hai lớp", "Đăng xuất", "Mã PIN hội thoại ẩn"]
+  case .security: return ["Khóa ứng dụng", "Hình nền màn hình khóa", "Phím tắt khóa", "Bảo mật hai lớp", "Đăng xuất", "Mã PIN hội thoại ẩn"]
   case .privacy: return ["Ngày sinh", "Trạng thái truy cập", "Trạng thái đã xem", "Người được nhắn tin", "Người được gọi", "Danh sách chặn", "Tìm qua số điện thoại", "Nguồn kết bạn", "Đang soạn"]
   case .sync: return ["Đồng bộ từ điện thoại", "Xuất bản sao", "Nhập lịch sử", "Sao lưu"]
   case .storage: return ["Dung lượng", "Bộ nhớ đệm", "Dọn dữ liệu", "Ổ đĩa", "Thư mục dữ liệu", "Hủy tải"]
@@ -24,6 +24,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   case .messages: return ["Tin nhắn nhanh", "Mẫu tin", "Ưu tiên và Khác", "Thư mục lưu tệp", "Nhấp đúp để trả lời", "Return để gửi", "Tải trước media", "Dán Excel", "Ảnh thu nhỏ"]
   case .calls: return ["Micrô", "Camera", "Loa", "Thông báo cuộc gọi đến", "Quyền thiết bị"]
   case .utilities: return ["Chụp màn hình", "Gợi ý nhãn dán", "Gợi ý @", "Nhắc tên", "Emoji", "GIF"]
+  case .ai: return ["Trợ lý AI", "Codex", "Claude", "MCP", "Chia sẻ hội thoại", "Tổng hợp công việc"]
   }
  }
  func match(_ query: String) -> String? { keywords.first { $0.localizedStandardContains(query) } }
@@ -32,7 +33,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   switch self {
   case .general: return .gray; case .updates: return .blue; case .security: return .blue; case .privacy: return .indigo; case .sync: return .green
   case .storage: return Color(red: 0.45, green: 0.47, blue: 0.52); case .appearance: return .purple; case .notifications: return .red
-  case .messages: return Color(red: 0.2, green: 0.78, blue: 0.35); case .calls: return .teal; case .utilities: return .orange
+  case .messages: return Color(red: 0.2, green: 0.78, blue: 0.35); case .calls: return .teal; case .utilities: return .orange; case .ai: return .pink
   }
  }
  var summary: String {
@@ -48,10 +49,11 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   case .messages: return "Cách soạn, đọc và lưu tin nhắn."
   case .calls: return "Micrô, camera và thông báo cuộc gọi."
   case .utilities: return "Gợi ý khi soạn và chụp màn hình."
+  case .ai: return "Cho trợ lý AI trên máy đọc các hội thoại bạn chọn."
   }
  }
  var icon: String {
-  switch self { case .general: return "switch.2"; case .updates: return "arrow.down.circle"; case .security: return "lock.shield"; case .privacy: return "hand.raised"; case .sync: return "arrow.triangle.2.circlepath"; case .storage: return "internaldrive"; case .appearance: return "paintpalette"; case .notifications: return "bell.badge"; case .messages: return "bubble.left"; case .calls: return "video"; case .utilities: return "slider.horizontal.3" }
+  switch self { case .general: return "switch.2"; case .updates: return "arrow.down.circle"; case .security: return "lock.shield"; case .privacy: return "hand.raised"; case .sync: return "arrow.triangle.2.circlepath"; case .storage: return "internaldrive"; case .appearance: return "paintpalette"; case .notifications: return "bell.badge"; case .messages: return "bubble.left"; case .calls: return "video"; case .utilities: return "slider.horizontal.3"; case .ai: return "sparkles" }
  }
 }
 
@@ -78,7 +80,7 @@ struct SettingsView: View {
  @AppStorage("nativeCaptureKey") private var captureKey = "s"
  @AppStorage("nativeCaptureHiddenKey") private var captureHiddenKey = "a"
  @AppStorage("nativeMentionSuggestions") private var mentionSuggestions = true
- @AppStorage("nativePrioritySplit") private var prioritySplit = true
+ @AppStorage("nativePrioritySplit") private var prioritySplit = false
  @AppStorage("nativeNotificationPreview") private var notificationPreview = true
  @AppStorage("nativeCallNotifications") private var callNotifications = true
  @AppStorage("nativeDockBadge") private var dockBadge = true
@@ -180,6 +182,8 @@ struct SettingsView: View {
    }
    Section("Khởi động") { Toggle("Mở khi đăng nhập macOS", isOn: Binding(get: { system.launchAtLogin }, set: { system.setLaunchAtLogin($0) })); Text("macOS có thể yêu cầu cho phép trong Mục đăng nhập.").font(.caption).foregroundStyle(.secondary) }
    Section("Kết nối") { LabeledContent("Trạng thái", value: store.connection); Button("Kết nối lại bộ xử lý") { store.restart() } }
+  case .ai:
+   AIBridgeSection()
   case .updates:
    SoftwareUpdateSection()
   case .security:
@@ -203,6 +207,7 @@ struct SettingsView: View {
     Button("Khóa ngay", systemImage: "lock") { store.isLocked = true }
     LabeledContent("Phím tắt khóa", value: "⌃⌘L")
     Toggle("Khóa khi ứng dụng chuyển sang nền", isOn: $lockOnDeactivate)
+    LockBackgroundPicker()
     Text("Mở khóa bằng xác thực macOS. Khóa màn hình không thay thế mã hóa dữ liệu trên ổ đĩa.").font(.caption).foregroundStyle(.secondary)
    }
    Section("Bảo mật tài khoản Zalo") {
@@ -271,7 +276,7 @@ struct SettingsView: View {
    Section("Thông báo trên máy") { Toggle("Thông báo tin nhắn và nhắc hẹn", isOn: $notifications); Toggle("Âm thanh thông báo", isOn: $notificationSound).disabled(!notifications); Toggle("Hiện tên và nội dung tin nhắn trong thông báo", isOn: $notificationPreview).disabled(!notifications); Toggle("Hiện số tin chưa đọc trên Dock", isOn: $dockBadge); Text("Hội thoại đã tắt thông báo hoặc đã ẩn không tạo thông báo. Khi ứng dụng đang khóa, thông báo không hiện nội dung.").font(.caption).foregroundStyle(.secondary); Text("Nếu macOS chặn thông báo, bật tùy chọn trong app không thể vượt qua quyền hệ thống.").font(.caption).foregroundStyle(.secondary) }
   case .messages:
    Section("Soạn và đọc") { Toggle("Return để gửi; Shift + Return xuống dòng", isOn: $sendWithReturn); Toggle("Nhấp đúp tin nhắn để trả lời", isOn: $doubleClickReply); Toggle("Hiển thị ảnh thu nhỏ", isOn: $thumbnails) }
-   Section("Danh sách hội thoại") { Toggle("Tách Ưu tiên và Khác", isOn: $prioritySplit); Text("Ưu tiên và Khác đồng bộ với Zalo trên điện thoại và máy tính. Nhấp chuột phải vào hội thoại để chuyển qua lại.").font(.caption).foregroundStyle(.secondary) }
+   Section("Danh sách hội thoại") { Toggle("Tách Ưu tiên và Khác", isOn: $prioritySplit); Text("Bật để có hai tab Ưu tiên và Khác như Zalo, đồng bộ với điện thoại; nhấp chuột phải vào hội thoại để chuyển qua lại. Tắt để xem mọi hội thoại trong một danh sách.").font(.caption).foregroundStyle(.secondary) }
    Section("Lưu tệp nhận được") {
     LabeledContent("Thư mục lưu", value: downloadDirectory.isEmpty ? "Hỏi mỗi lần lưu" : downloadDirectory)
     HStack { Button("Chọn thư mục…") { chooseDownloadDirectory() }; if !downloadDirectory.isEmpty { Button("Luôn hỏi") { downloadDirectory = "" } } }

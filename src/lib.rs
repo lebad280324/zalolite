@@ -1,4 +1,5 @@
 pub mod account_manager;
+pub mod ai_bridge;
 pub mod audio;
 pub mod call;
 pub mod chat;

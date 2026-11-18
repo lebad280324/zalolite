@@ -158,7 +158,7 @@ final class AppStore: ObservableObject {
         UserDefaults.standard.register(defaults: ["nativeNotificationsEnabled": true, "nativeNotificationSound": true,
             "nativeDoubleClickReply": true, "nativeShowThumbnails": true, "nativeSendWithReturn": true,
             "nativeStickerSuggestions": true, "nativeUseAvatarWallpaper": false, "nativeLockOnDeactivate": false,
-            "nativeMentionSuggestions": true, "nativePrioritySplit": true, "nativeNotificationPreview": true,
+            "nativeMentionSuggestions": true, "nativePrioritySplit": false, "nativeNotificationPreview": true,
             "nativeCallNotifications": true, "nativeDockBadge": true])
         demo = arguments.contains("--demo")
         let base = FileManager.default.homeDirectoryForCurrentUser
@@ -275,7 +275,7 @@ final class AppStore: ObservableObject {
         let oldBridge = bridge
         bridge = nil; started = false
         ready = false; busy.removeAll(); pending.removeAll(); cancelTimeouts()
-        session = SessionSnapshot(); threads = []; messages = [:]; selectedThreadID = nil
+        session = SessionSnapshot(); AIBridgeSettings.shared.detach(); threads = []; messages = [:]; selectedThreadID = nil
         draft = ""; quote = nil; qrImage = nil; capabilities = []
         drafts.removeAll(); historyLimits.removeAll(); historyCursors.removeAll(); historyHasMore.removeAll(); historyHasNewer.removeAll(); removedMessageIDs.removeAll(); pageRequests.removeAll(); messageCacheOrder.removeAll(); lastHistoryRefresh.removeAll(); transcript.reset()
         resetExtras()
@@ -549,7 +549,7 @@ final class AppStore: ObservableObject {
                     cancelTimeouts(); pending.removeAll(); busy.removeAll()
                     drafts.removeAll(); historyLimits.removeAll(); historyCursors.removeAll(); historyHasMore.removeAll(); historyHasNewer.removeAll(); removedMessageIDs.removeAll(); pageRequests.removeAll(); messageCacheOrder.removeAll(); lastHistoryRefresh.removeAll(); transcript.reset()
                     receivedThreadSnapshot = false
-                    threads = []; messages = [:]; selectedThreadID = nil; draft = ""; quote = nil
+                    AIBridgeSettings.shared.detach(); threads = []; messages = [:]; selectedThreadID = nil; draft = ""; quote = nil
                     resetExtras()
                 }
                 session = next
@@ -564,10 +564,11 @@ final class AppStore: ObservableObject {
                     if session.name.isEmpty || safeWebURL(session.avatar) == nil { requestOwnProfile() }
                     qrImage = nil; connection = demo ? "Bản xem trước" : "Đã đăng nhập"
                     reloadWorkspaceFeatures()
+                    if !demo { AIBridgeSettings.shared.attach(account: session.uin, ownerName: session.name, directory: dataDirectory, threads: threads) }
                     if supports("get_privacy_guard") { send("get_privacy_guard") }
                 }
                 else {
-                    threads = []; messages = [:]; selectedThreadID = nil; draft = ""; quote = nil
+                    AIBridgeSettings.shared.detach(); threads = []; messages = [:]; selectedThreadID = nil; draft = ""; quote = nil
                     connection = "Chưa đăng nhập"
                 }
             case "threads":

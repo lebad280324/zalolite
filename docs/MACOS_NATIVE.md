@@ -239,3 +239,20 @@ một bản sao `-macos-arm64.zip` cùng nội dung để Zalolite 0.0.11 (chỉ
 
 Giữ `version` của bản build thử không thấp hơn bản đã phát hành: trình cập nhật coi bản thấp hơn là bản cũ và
 sẽ đề nghị thay nó bằng bản trên GitHub.
+
+## Trợ lý AI (MCP)
+
+**Cài đặt → Trợ lý AI** cho phép trợ lý AI trên cùng máy (Codex, Claude Code, Claude Desktop) đọc các
+hội thoại người dùng chọn, qua cầu nối `ctdozlite-core --mcp --data-dir <thư mục dữ liệu>` (chuẩn Model
+Context Protocol trên stdio, `src/ai_bridge.rs`).
+
+- Ứng dụng ghi `ai_bridge.json` (quyền 0600) trong thư mục dữ liệu: bật/tắt, tài khoản và danh sách hội
+  thoại được chia sẻ. Cầu nối đọc lại tệp này ở mỗi yêu cầu, nên thay đổi có hiệu lực ngay; đăng xuất hoặc
+  tắt chia sẻ làm mọi yêu cầu bị từ chối.
+- Cầu nối chỉ mở `accounts/<uin>/native_history.db` ở chế độ chỉ đọc, không dùng phiên đăng nhập, không gọi
+  mạng và không gửi được tin nhắn. Nó không lấy khóa thư mục dữ liệu nên chạy song song với ứng dụng.
+- Công cụ: `list_conversations`, `read_messages` (`conversation_id`, `days` hoặc `since`/`until`, `limit`),
+  `search_messages` (`query`, tuỳ chọn `conversation_id`, `days`, `limit`). Hội thoại ngoài danh sách luôn bị
+  từ chối.
+- Trang cài đặt hiện sẵn lệnh `codex mcp add …`, `claude mcp add …` và cấu hình Claude Desktop. Nội dung
+  trợ lý đọc được gửi tới dịch vụ AI khi người dùng hỏi; tính năng tắt theo mặc định.
