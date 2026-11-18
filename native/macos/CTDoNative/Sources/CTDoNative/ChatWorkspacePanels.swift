@@ -53,8 +53,8 @@ struct GlobalSearchPanel: View {
                                     VStack(alignment:.leading,spacing:4){Text(verbatim:store.threads.first{$0.id==hit.threadID}?.name ?? "Hội thoại đã lưu").font(.caption).foregroundStyle(.secondary);Text(verbatim:kind == "files" ? hit.message.fileName ?? hit.message.text:hit.message.text).lineLimit(3);Text(hit.message.date,format:.dateTime.day().month().year()).font(.caption2).foregroundStyle(.tertiary)};Spacer()}.padding(9).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                         }
-                        if query.isEmpty {ContentUnavailableView("Nhập từ khóa",systemImage:"magnifyingglass",description:Text("Tìm trong lịch sử đã lưu trên máy."))}
-                        else if store.historyResults.isEmpty && !store.busy.contains("search_history"){ContentUnavailableView("Không có kết quả",systemImage:"magnifyingglass")}
+                        if query.isEmpty {EmptyState("Nhập từ khóa",systemImage:"magnifyingglass",description:Text("Tìm trong lịch sử đã lưu trên máy."))}
+                        else if store.historyResults.isEmpty && !store.busy.contains("search_history"){EmptyState("Không có kết quả",systemImage:"magnifyingglass")}
                     }
                 }
             }

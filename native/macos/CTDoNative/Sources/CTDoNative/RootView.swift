@@ -4,7 +4,7 @@ import NativeBridge
 
 struct RootView: View {
     @EnvironmentObject private var store: AppStore
-    @Environment(\.openSettings) private var openSettings
+    @OpenSettingsCompat private var openSettings
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
     @State private var sidebarWidth: CGFloat = 300
@@ -28,7 +28,7 @@ struct RootView: View {
         .background { if store.session.loggedIn {ChatBackgroundView(thread:store.selectedThread)} else {WorkspaceBackdrop()} }
         .background(NativeWindowChrome { radius in if abs(store.windowCornerRadius - radius) > 0.5 { store.windowCornerRadius = radius } })
         .onAppear { let open = openWindow; store.openMainWindow = { open(id: "main") } }
-        .onChange(of: store.session.uin, initial: true) { _, account in
+        .onValueChange(of: store.session.uin, initial: true) { _, account in
             recentSearches.activate(account: account, persistent: !store.demo)
         }
         .toolbarBackground(.hidden, for: .windowToolbar)
@@ -91,7 +91,7 @@ struct RootView: View {
             }
         } message: { Text("Hãy kiểm tra bản sao lưu trước khi xóa. Thao tác này được gửi đến Zalo và có thể làm mất lịch sử truy cập từ hội thoại.") }
         .background { GeometryReader { proxy in Color.clear.onAppear { rootFrame.value = proxy.frame(in: .global) }
-            .onChange(of: proxy.frame(in: .global)) { _, frame in rootFrame.value = frame } } }
+            .onValueChange(of: proxy.frame(in: .global)) { _, frame in rootFrame.value = frame } } }
         .overlay(alignment: .topLeading) { threadMenuOverlay }
         .animation(reducedMotion ? nil : .snappy(duration: 0.18), value: threadMenu?.id)
         .onAppear {
@@ -150,7 +150,7 @@ struct RootView: View {
             // Starts right under the toolbar band, so the search button sits midway between the window edge and the card.
             .padding(.horizontal, cardInset).padding(.top, 0).padding(.bottom, cardInset)
 
-            .toolbar(removing: .sidebarToggle)
+            .removingSidebarToggle()
             .toolbar {
                 ToolbarItem(placement: .navigation) { sidebarControls }
             }
@@ -215,16 +215,15 @@ struct RootView: View {
                     if store.threads.isEmpty && !store.busy.isDisjoint(with: ["bootstrap", "refresh_threads"]) {
                         ProgressView("Đang tải hội thoại…")
                     } else if !store.searchText.isEmpty {
-                        ContentUnavailableView {
-                            Label("Không có kết quả", systemImage: "magnifyingglass")
-                        } description: { Text("Không có hội thoại khớp “\(store.searchText)”.") } actions: {
+                        EmptyState("Không có kết quả", systemImage: "magnifyingglass",
+                                   description: Text("Không có hội thoại khớp “\(store.searchText)”.")) {
                             if store.supports("search_history") { Button("Tìm trong nội dung tin nhắn…") { store.showingHistorySearch = true } }
                         }
                     } else if store.threads.isEmpty {
-                        ContentUnavailableView("Chưa có tin nhắn", systemImage: "bubble.left.and.bubble.right",
+                        EmptyState("Chưa có tin nhắn", systemImage: "bubble.left.and.bubble.right",
                                                description: Text("Nhấn nút soạn để bắt đầu trò chuyện."))
                     } else {
-                        ContentUnavailableView("Không có hội thoại trong bộ lọc này", systemImage: "line.3.horizontal.decrease",
+                        EmptyState("Không có hội thoại trong bộ lọc này", systemImage: "line.3.horizontal.decrease",
                                                description: Text("Chọn Bỏ lọc để xem tất cả."))
                     }
                 }
@@ -329,7 +328,7 @@ struct RootView: View {
             Section(store.session.name.isEmpty ? "Tài khoản Zalo" : store.session.name) {
                 Text(verbatim: store.connection)
                 Button("Thông tin tài khoản…", systemImage: "person.crop.circle") { store.showingAccountInfo = true }
-                SettingsLink { Label("Cài đặt…", systemImage: "gearshape") }
+                SettingsLinkCompat { Label("Cài đặt…", systemImage: "gearshape") }
                 Button("Dữ liệu và dung lượng…", systemImage: "internaldrive") { store.requestedSettingsPage = "storage"; openSettings() }
                 Button("Đồng bộ và sao lưu…", systemImage: "arrow.triangle.2.circlepath") { store.requestedSettingsPage = "sync"; openSettings() }
                 Button("Hướng dẫn và hỗ trợ", systemImage: "questionmark.circle") {
@@ -405,7 +404,7 @@ struct LoginView: View {
             Spacer()
             HStack {
                 Text("Phiên đăng nhập và lịch sử được lưu trên máy.")
-                SettingsLink { Text("Cài đặt…") }
+                SettingsLinkCompat { Text("Cài đặt…") }
             }
             .font(.caption).foregroundStyle(.secondary).padding(.bottom, 20)
         }
@@ -457,7 +456,7 @@ struct ThreadRow: View {
                                 TypingDots(color: selected ? .white : .accentColor)
                             }
                         }
-                        else if let draft { Text("Nháp: ").foregroundStyle(selected ? .white : .orange) + Text(verbatim: draft).foregroundStyle(secondary) }
+                        else if let draft { Text("Nháp: ").tinted(selected ? .white : .orange) + Text(verbatim: draft).tinted(secondary) }
                         else { Text(verbatim: thread.lastMessage).foregroundStyle(secondary) }
                     }.font(.system(size: 12.5)).lineLimit(2)
                         .frame(maxWidth: .infinity, minHeight: 29, alignment: .topLeading)

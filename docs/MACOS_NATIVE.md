@@ -9,6 +9,26 @@ dụng riêng, không tự thay `/Applications/ctdozlite.app` và không dùng t
 nhật của bản egui. Từ v0.0.12, gói phát hành là bản Universal chạy trên cả Mac Apple Silicon
 và Mac Intel (macOS 14 trở lên); macOS tự chọn mã máy đúng với chip khi mở ứng dụng.
 
+### Bản riêng cho macOS 13 Ventura
+
+`bash packaging/package-native-macos.sh --macos13` dựng bản riêng vào `dist/macos13/Zalolite.app`
+(`LSMinimumSystemVersion` 13.0, cũng là Universal). Cờ này đặt `CTDOZLITE_LEGACY_MACOS13=1`, nên
+`Package.swift` hạ nền tảng xuống macOS 13 và bật `LEGACY_MACOS13`. Các API chỉ có từ macOS 14 đi qua
+`Compat.swift`: bản thường vẫn gọi đúng API cũ, còn bản macOS 13 dùng cách thay thế:
+
+- `onChange(of:initial:)` → `onChange(of:)` có giữ giá trị cũ; `ContentUnavailableView` → khung trống tự vẽ.
+- Mở Cài đặt qua mục ⌘, của menu ứng dụng thay cho `openSettings` / `SettingsLink`.
+- Không có hiệu ứng nảy của cảm xúc, hiệu ứng đổi biểu tượng phát/dừng và trình đo khung hình
+  (`CTDOZLITE_FRAME_PROBE`); nút viền tròn dùng viền bo góc.
+
+Rust và helper Swift dùng `MACOSX_DEPLOYMENT_TARGET=13.0` với thư mục build riêng (`target/macos13`,
+`target/swift-native-macos13`). `make-native-release.sh` thêm `Zalolite-<bản>-macos13-universal.zip/.dmg`
+khi có `dist/macos13/Zalolite.app`. Trình cập nhật của mỗi bản chỉ nhận tệp có đúng đoạn tên của mình
+(`-macos-` hoặc `-macos13-`), nên người dùng macOS 13 luôn nhận bản macOS 13.
+
+Kiểm thử bản này: `CTDOZLITE_LEGACY_MACOS13=1 swift test --scratch-path .build-macos13` trong
+`native/macos/CTDoNative`. Bản macOS 13 chưa được chạy trên máy macOS 13 thật.
+
 ## Xây dựng và mở ứng dụng
 
 Cần Rust, Xcode Command Line Tools và macOS 14 trở lên để xây dựng frontend.

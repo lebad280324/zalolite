@@ -25,9 +25,14 @@ struct UpdateRelease: Equatable {
         #endif
     }
 
+    /// The asset name segment of this edition: `-macos-` for the regular app, `-macos13-` for the macOS 13 edition,
+    /// so each edition only ever installs its own build.
+    static var editionSegment: String { isLegacyMacOS13Edition ? "macos13" : "macos" }
+
     /// Reads the `releases/latest` payload; nil when the release has no ZIP this Mac can run or no checksum list.
     /// A Universal ZIP is preferred; a single-architecture ZIP is used only when it matches `architecture`.
-    init?(json data: Data, architecture: String = UpdateRelease.hostArchitecture) {
+    init?(json data: Data, architecture: String = UpdateRelease.hostArchitecture,
+          edition: String = UpdateRelease.editionSegment) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               (root["draft"] as? Bool) != true, (root["prerelease"] as? Bool) != true,
               let tag = root["tag_name"] as? String, let version = Self.normalized(tag),
@@ -42,7 +47,7 @@ struct UpdateRelease: Equatable {
             return nil
         }
         func named(_ suffix: String) -> (String, URL, Int)? {
-            asset { $0.hasPrefix("Zalolite-") && $0.hasSuffix("-macos-\(suffix).zip") && !$0.contains("/") }
+            asset { $0.hasPrefix("Zalolite-") && $0.hasSuffix("-\(edition)-\(suffix).zip") && !$0.contains("/") }
         }
         guard let zip = named("universal") ?? named(architecture),
               let sums = asset({ $0 == "SHA256SUMS.txt" }) else { return nil }

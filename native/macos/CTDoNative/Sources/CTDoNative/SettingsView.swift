@@ -159,8 +159,8 @@ struct SettingsView: View {
   }
   .navigationTitle(page.rawValue)
   .frame(minWidth: 900, idealWidth: 940, minHeight: 620, idealHeight: 680)
-  .task { system.refresh(); applyRequestedPage(); refreshPage() }.onChange(of: page) { _, _ in refreshPage() }
-  .onChange(of: store.requestedSettingsPage) { _, _ in applyRequestedPage() }
+  .task { system.refresh(); applyRequestedPage(); refreshPage() }.onValueChange(of: page) { _, _ in refreshPage() }
+  .onValueChange(of: store.requestedSettingsPage) { _, _ in applyRequestedPage() }
   .alert("Thay đổi \(pendingLabel)?", isPresented: Binding(get: { pendingKey != nil }, set: { if !$0 { pendingKey = nil } })) {
    Button("Hủy", role: .cancel) { pendingKey = nil }
    Button("Áp dụng") { if let key = pendingKey { store.send("set_account_setting", parameters: ["key": .string(key), "value": .number(Double(pendingValue))]) }; pendingKey = nil }
@@ -295,8 +295,8 @@ struct SettingsView: View {
   case .utilities:
    Section("Soạn nhanh") { Toggle("Gợi ý nhãn dán khi gõ", isOn: $stickerSuggestions); Text("Khi bật, từ đơn bạn đang gõ được gửi tới Zalo để tìm nhãn dán phù hợp.").font(.caption).foregroundStyle(.secondary); Toggle("Gợi ý tên thành viên khi gõ @", isOn: $mentionSuggestions); Text("Tên được chèn dưới dạng văn bản; chưa tạo thông báo nhắc tên cho người được nhắc.").font(.caption).foregroundStyle(.secondary); Button("Mở Emoji & Ký hiệu") { NSApp.orderFrontCharacterPalette(nil) }; unavailable("Tìm GIF chưa có nguồn tích hợp được xác nhận.") }
    Section("Chụp màn hình") {
-    TextField("⌘⌥ + phím để chụp", text: $captureKey).onChange(of: captureKey) { _, value in captureKey = String(value.lowercased().prefix(1)) }
-    TextField("⌘⌥ + phím để ẩn app rồi chụp", text: $captureHiddenKey).onChange(of: captureHiddenKey) { _, value in captureHiddenKey = String(value.lowercased().prefix(1)) }
+    TextField("⌘⌥ + phím để chụp", text: $captureKey).onValueChange(of: captureKey) { _, value in captureKey = String(value.lowercased().prefix(1)) }
+    TextField("⌘⌥ + phím để ẩn app rồi chụp", text: $captureHiddenKey).onValueChange(of: captureHiddenKey) { _, value in captureHiddenKey = String(value.lowercased().prefix(1)) }
     Button("Chụp màn hình…") { NativeSystem.captureScreen(hideApp: false) }; Button("Ẩn app rồi chụp…") { NativeSystem.captureScreen(hideApp: true) }
     Text("Phím tắt có hiệu lực khi ứng dụng đang được chọn. macOS có thể yêu cầu quyền ghi màn hình.").font(.caption).foregroundStyle(.secondary)
    }
@@ -481,7 +481,7 @@ struct StorageOverview: View {
   }
   .padding(.vertical, 6)
   .onAppear { refresh() }
-  .onChange(of: store.features.usage) { _, _ in updated = Date() }
+  .onValueChange(of: store.features.usage) { _, _ in updated = Date() }
  }
 
  private func refresh() {

@@ -71,13 +71,13 @@ struct ContactsWorkspace: View {
      .overlay {
       if rows.isEmpty {
        if listBusy { ProgressView("Đang tải danh sách…") }
-       else if !query.isEmpty { ContentUnavailableView("Không có kết quả", systemImage: "magnifyingglass", description: Text("Thử từ khóa khác.")) }
-       else { ContentUnavailableView("Danh sách trống", systemImage: "person.2", description: Text("Nhấn Làm mới để tải lại từ Zalo.")) }
+       else if !query.isEmpty { EmptyState("Không có kết quả", systemImage: "magnifyingglass", description: Text("Thử từ khóa khác.")) }
+       else { EmptyState("Danh sách trống", systemImage: "person.2", description: Text("Nhấn Làm mới để tải lại từ Zalo.")) }
       }
      }
    }
   }.padding(26).frame(maxWidth: .infinity, maxHeight: .infinity).background { WorkspaceBackdrop() }
-   .onChange(of:store.contactSection){_,_ in reload()}.onAppear{reload()}
+   .onValueChange(of:store.contactSection){_,_ in reload()}.onAppear{reload()}
  }
  @ViewBuilder func contactMenu(_ row: FeatureRow) -> some View {
   Button("Nhắn tin", systemImage: "bubble.left") { store.openContact(row) }
@@ -123,7 +123,7 @@ struct SavedWorkspace: View {
      if tab == "reminders" { Button(role: .destructive) { store.send("delete_reminder", parameters: ["id": .string(row.id)]) } label: { Image(systemName: "trash") } }
     }.padding(.vertical, 8)
    }.listStyle(.inset).scrollContentBackground(.hidden)
-    .overlay { if store.features.rows(tab).isEmpty { ContentUnavailableView("Chưa có nội dung", systemImage: "bookmark", description: Text("Dùng menu của tin nhắn hoặc hội thoại để lưu vào đây.")) } }
+    .overlay { if store.features.rows(tab).isEmpty { EmptyState("Chưa có nội dung", systemImage: "bookmark", description: Text("Dùng menu của tin nhắn hoặc hội thoại để lưu vào đây.")) } }
    }
   }.padding(26).background { WorkspaceBackdrop() }.onAppear { store.reloadWorkspaceFeatures() }
  }
@@ -145,7 +145,7 @@ struct SavedWorkspace: View {
      Button("Hiện lại") { store.featureThread("hide_thread", thread: thread, values: ["hide": .bool(false)]) }.disabled(store.busy.contains("hide_thread"))
     }.padding(.vertical, 6)
    }.listStyle(.inset).scrollContentBackground(.hidden)
-    .overlay { if store.hiddenThreads.isEmpty { ContentUnavailableView("Không có hội thoại ẩn", systemImage: "eye", description: Text("Hội thoại bạn ẩn từ menu sẽ nằm ở đây.")) } }
+    .overlay { if store.hiddenThreads.isEmpty { EmptyState("Không có hội thoại ẩn", systemImage: "eye", description: Text("Hội thoại bạn ẩn từ menu sẽ nằm ở đây.")) } }
   }
  }
 }

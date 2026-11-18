@@ -428,14 +428,14 @@ struct HistorySearchView: View {
             }.listStyle(.inset).scrollContentBackground(.hidden)
                 .overlay {
                     if store.historyResults.isEmpty && !store.busy.contains("search_history") {
-                        ContentUnavailableView(query.isEmpty ? "Nhập nội dung cần tìm" : "Không có kết quả",
+                        EmptyState(query.isEmpty ? "Nhập nội dung cần tìm" : "Không có kết quả",
                                                systemImage: "text.magnifyingglass",
                                                description: Text("Chỉ tìm trong lịch sử đã lưu trên máy này, tối đa 300 kết quả."))
                     }
                 }
         }
         .padding(24).frame(width: 620, height: 560)
-        .onChange(of: currentOnly) { _, _ in run() }
+        .onValueChange(of: currentOnly) { _, _ in run() }
         .task(id: query) {
             do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
             run()
@@ -507,7 +507,7 @@ struct ComposerAssist: View {
             do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return }
             store.requestStickerSuggestions()
         }
-        .onChange(of: store.draft) { _, _ in store.loadMentionMembersIfNeeded(for: thread) }
+        .onValueChange(of: store.draft) { _, _ in store.loadMentionMembersIfNeeded(for: thread) }
     }
 }
 
@@ -530,7 +530,7 @@ struct AddToGroupView: View {
             List(groups, selection: $groupID) { row in
                 HStack { AvatarView(name: row.string("name"), url: row.string("avatar"), size: 30, group: true); Text(verbatim: row.string("name")) }.tag(row.id)
             }.listStyle(.inset)
-                .overlay { if groups.isEmpty { ContentUnavailableView("Chưa có nhóm", systemImage: "person.3", description: Text("Làm mới danh bạ để tải danh sách nhóm.")) } }
+                .overlay { if groups.isEmpty { EmptyState("Chưa có nhóm", systemImage: "person.3", description: Text("Làm mới danh bạ để tải danh sách nhóm.")) } }
             if let error = store.error { Text(verbatim: error).font(.caption).foregroundStyle(.orange) }
             HStack {
                 Spacer()

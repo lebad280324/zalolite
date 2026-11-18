@@ -8,14 +8,17 @@ BUILD=1
 WITH_HELPERS=1
 # Releases are Universal (Apple Silicon + Intel); --host-arch is a faster local build.
 ARCHS=(arm64 x86_64)
+# --macos13 builds the separate macOS 13 edition into dist/macos13/ (see Compat.swift).
+EDITION=default
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --debug) CONFIGURATION=debug ;;
         --no-build) BUILD=0 ;;
         --without-legacy-helpers) WITH_HELPERS=0 ;;
         --host-arch) ARCHS=("$(uname -m)") ;;
+        --macos13) EDITION=macos13 ;;
         --help)
-            printf 'Usage: %s [--debug] [--no-build] [--without-legacy-helpers] [--host-arch]\n' "$0"
+            printf 'Usage: %s [--debug] [--no-build] [--without-legacy-helpers] [--host-arch] [--macos13]\n' "$0"
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
     esac
@@ -35,14 +38,24 @@ if ! command -v "$CARGO_COMMAND" >/dev/null 2>&1 && [[ -x "${HOME:-}/.cargo/bin/
 fi
 SWIFT_PACKAGE="$ROOT_DIR/native/macos/CTDoNative"
 SWIFT_BUILD="$ROOT_DIR/target/swift-native"
+MIN_MACOS=14.0
+DESTINATION="$ROOT_DIR/dist/Zalolite.app"
+if [[ "$EDITION" == macos13 ]]; then
+    MIN_MACOS=13.0
+    export CTDOZLITE_LEGACY_MACOS13=1
+    # Separate caches: the deployment target is baked into every object file.
+    SWIFT_BUILD="$ROOT_DIR/target/swift-native-macos13"
+    export CARGO_TARGET_DIR="$ROOT_DIR/target/macos13"
+    DESTINATION="$ROOT_DIR/dist/macos13/Zalolite.app"
+fi
 SWIFT_BUILD_OPTIONS=()
 # Allow a local SDK build-service failure to use SwiftPM's native engine.
 if [[ -n "${CTDOZLITE_SWIFT_BUILD_SYSTEM:-}" ]]; then
     SWIFT_BUILD_OPTIONS+=(--build-system "$CTDOZLITE_SWIFT_BUILD_SYSTEM")
 fi
 # Each slice is kept apart because SwiftPM reuses one product path for every --arch.
-SLICES="$ROOT_DIR/target/native-slices/$CONFIGURATION"
-export MACOSX_DEPLOYMENT_TARGET=14.0
+SLICES="$ROOT_DIR/target/native-slices/$EDITION/$CONFIGURATION"
+export MACOSX_DEPLOYMENT_TARGET="$MIN_MACOS"
 for arch in "${ARCHS[@]}"; do
     case "$arch" in
         arm64) RUST_TARGET=aarch64-apple-darwin ;;
@@ -80,11 +93,12 @@ lipo_all ctdozlite-core "$APP/Contents/Helpers/ctdozlite-core"
 cp packaging/macos/Native-Info.plist "$APP/Contents/Info.plist"
 cp LICENSE-MIT LICENSE-APACHE NOTICE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+plutil -replace LSMinimumSystemVersion -string "$MIN_MACOS" "$APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$(date -u +%Y%m%d%H%M%S)" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 if [[ "$WITH_HELPERS" == 1 ]]; then
-    HELPER_TARGETS="$(printf '%s-apple-macosx14.0,' "${ARCHS[@]}")"
+    HELPER_TARGETS="$(printf "%s-apple-macosx$MIN_MACOS," "${ARCHS[@]}")"
     env -u HISTORY_CODEC_ASSETS SWIFT_TARGETS="${HELPER_TARGETS%,}" \
         bash native/macos/build-native-helpers.sh "$APP"
     cp sync_v2_helper.js zproto_lib.js "$APP/Contents/Resources/"
@@ -113,7 +127,7 @@ if [[ -d "$APP/Contents/Helpers/DailyNotifier.app" ]]; then
 fi
 codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP"
 python3 packaging/macos/validate-swiftui-bundle.py "$APP"
-DESTINATION="$ROOT_DIR/dist/Zalolite.app"
+mkdir -p "$(dirname "$DESTINATION")"
 # Only replace this script's build artifact; never the installed application.
 if [[ -e "$DESTINATION" ]]; then rm -rf "$DESTINATION"; fi
 mv "$APP" "$DESTINATION"

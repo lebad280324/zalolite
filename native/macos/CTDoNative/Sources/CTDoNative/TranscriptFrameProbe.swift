@@ -3,6 +3,12 @@ import SwiftUI
 import QuartzCore
 import NativeBridge
 
+#if LEGACY_MACOS13
+/// The frame probe needs `CADisplayLink`, which is macOS 14 only; the macOS 13 edition skips it.
+@MainActor
+func runTranscriptFrameProbeIfRequested(_ store: AppStore) async {}
+#else
+
 /// Development-only frame probe. It drives the real window with synthetic history and reports
 /// missed display refreshes, reading-position jumps and rows whose height is wrong on screen.
 /// Runs only with `--demo` and `CTDOZLITE_FRAME_PROBE=<report.json>`; never touches a signed-in account.
@@ -399,3 +405,4 @@ private final class TranscriptFrameProbe: NSObject {
                 "note": "Synthetic history driven inside the real window; photos are pre-decoded and no network is involved."]
     }
 }
+#endif

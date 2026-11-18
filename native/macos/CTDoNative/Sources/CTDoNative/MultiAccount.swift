@@ -174,7 +174,7 @@ struct AccountMenuItems: View {
 /// The active account's photo beside the search button; opens the list of accounts on this Mac.
 struct AccountSwitcherButton: View {
     @EnvironmentObject private var store: AppStore
-    @Environment(\.openSettings) private var openSettings
+    @OpenSettingsCompat private var openSettings
     @State private var open = false
 
     var body: some View {
@@ -203,7 +203,7 @@ struct AccountSwitcherButton: View {
             }
         }
         .padding(8).frame(width: 260)
-        .presentationBackground(.ultraThinMaterial)
+        .materialPresentationBackground()
     }
 
     private func row(name: String, avatar: String?, current: Bool, run: @escaping () -> Void) -> some View {

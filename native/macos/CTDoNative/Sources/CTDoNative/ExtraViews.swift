@@ -45,19 +45,19 @@ struct StickerPickerView: View {
                 .overlay {
                     if store.stickerItems.isEmpty {
                         if !store.busy.isDisjoint(with: ["sticker_pack", "search_stickers"]) { ProgressView() }
-                        else { ContentUnavailableView("Chọn bộ nhãn dán", systemImage: "face.smiling", description: Text("Chọn một bộ hoặc tìm nhãn dán bạn muốn gửi.")) }
+                        else { EmptyState("Chọn bộ nhãn dán", systemImage: "face.smiling", description: Text("Chọn một bộ hoặc tìm nhãn dán bạn muốn gửi.")) }
                     }
                 }
             }
             if let error = store.error { Text(verbatim: error).font(.caption).foregroundStyle(.red).padding(12) }
         }
         .frame(width: 650, height: 480)
-        .onChange(of: selectedPack) { _, category in
+        .onValueChange(of: selectedPack) { _, category in
             guard let category else { return }
             query = ""
             store.send("sticker_pack", parameters: ["cate_id": .number(Double(category))])
         }
-        .onChange(of: store.stickerPacks.map(\.id)) { _, ids in
+        .onValueChange(of: store.stickerPacks.map(\.id)) { _, ids in
             if selectedPack == nil { selectedPack = ids.first }
         }
         .task(id: query) {
@@ -154,7 +154,7 @@ struct ScheduledMessagesView: View {
             }
             .overlay {
                 if store.scheduledMessages.isEmpty {
-                    ContentUnavailableView("Chưa có tin nhắn hẹn giờ", systemImage: "clock",
+                    EmptyState("Chưa có tin nhắn hẹn giờ", systemImage: "clock",
                                            description: Text("Soạn tin nhắn và chọn biểu tượng đồng hồ để hẹn giờ gửi."))
                 }
             }

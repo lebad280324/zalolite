@@ -108,7 +108,7 @@ struct UpdateMenuItem: View {
 struct UpdateToolbarButton: View {
     @ObservedObject private var updater = SoftwareUpdater.shared
     @EnvironmentObject private var store: AppStore
-    @Environment(\.openSettings) private var openSettings
+    @OpenSettingsCompat private var openSettings
     @State private var open = false
     /// Kept so an install error stays reachable from the toolbar instead of the button vanishing.
     @State private var lastRelease: UpdateRelease?
@@ -128,7 +128,7 @@ struct UpdateToolbarButton: View {
             .popover(isPresented: $open, arrowEdge: .bottom) { panel(release) }
             .transition(.scale(scale: 0.8).combined(with: .opacity))
             .onAppear { lastRelease = release }
-            .onChange(of: release) { _, value in lastRelease = value }
+            .onValueChange(of: release) { _, value in lastRelease = value }
         }
     }
 

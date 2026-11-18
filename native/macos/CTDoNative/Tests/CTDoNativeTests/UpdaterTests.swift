@@ -2,8 +2,8 @@ import XCTest
 @testable import CTDoNative
 
 final class UpdaterTests: XCTestCase {
-    private func release(_ json: [String: Any], architecture: String = "arm64") -> UpdateRelease? {
-        UpdateRelease(json: try! JSONSerialization.data(withJSONObject: json), architecture: architecture)
+    private func release(_ json: [String: Any], architecture: String = "arm64", edition: String = "macos") -> UpdateRelease? {
+        UpdateRelease(json: try! JSONSerialization.data(withJSONObject: json), architecture: architecture, edition: edition)
     }
 
     private func zip(_ name: String) -> [String: Any] {
@@ -45,6 +45,16 @@ final class UpdaterTests: XCTestCase {
         XCTAssertNil(release(["tag_name": "v0.0.12", "assets": appleOnly], architecture: "x86_64"))
         let intel = try XCTUnwrap(release(["tag_name": "v0.0.12", "assets": [sums, zip("Zalolite-0.0.12-macos-x86_64.zip")]], architecture: "x86_64"))
         XCTAssertEqual(intel.archiveName, "Zalolite-0.0.12-macos-x86_64.zip")
+    }
+
+    func testEachEditionOnlyInstallsItsOwnZip() throws {
+        let both = [assets[0], zip("Zalolite-0.0.16-macos-universal.zip"), zip("Zalolite-0.0.16-macos-arm64.zip"),
+                    zip("Zalolite-0.0.16-macos13-universal.zip")]
+        XCTAssertEqual(try XCTUnwrap(release(["tag_name": "v0.0.16", "assets": both])).archiveName, "Zalolite-0.0.16-macos-universal.zip")
+        XCTAssertEqual(try XCTUnwrap(release(["tag_name": "v0.0.16", "assets": both], edition: "macos13")).archiveName,
+                       "Zalolite-0.0.16-macos13-universal.zip")
+        // A release without a macOS 13 build is not offered to that edition, even though a regular ZIP exists.
+        XCTAssertNil(release(["tag_name": "v0.0.16", "assets": Array(both.dropLast())], edition: "macos13"))
     }
 
     func testComparesVersionsNumerically() {

@@ -77,15 +77,15 @@ struct ConversationView: View {
             composer
         }
         .ignoresSafeArea(.container, edges: .top)
-        .onChange(of:store.jumpMessageID){_,target in
+        .onValueChange(of:store.jumpMessageID){_,target in
             guard let target else{return};mediaOnly=false;store.highlightedMessageID=target
             Task{@MainActor in
                 try? await Task.sleep(nanoseconds:2_200_000_000)
                 if store.highlightedMessageID==target{store.highlightedMessageID=nil}
             }
         }
-        .onChange(of:store.conversationSearch){_,query in store.transcript.configure(query:query,media:mediaOnly,threadID:thread.id)}
-        .onChange(of:mediaOnly){_,value in store.transcript.configure(query:store.conversationSearch,media:value,threadID:thread.id)}
+        .onValueChange(of:store.conversationSearch){_,query in store.transcript.configure(query:query,media:mediaOnly,threadID:thread.id)}
+        .onValueChange(of:mediaOnly){_,value in store.transcript.configure(query:store.conversationSearch,media:value,threadID:thread.id)}
         .toolbarBackground(.hidden, for:.windowToolbar)
         .onAppear {
             swipe.install(hovered: { store.selectingMessages == false ? TranscriptPointer.messageID() : nil },
@@ -104,7 +104,7 @@ struct ConversationView: View {
             }
             if !thread.isGroup { store.requestProfile(thread.id) }
         }
-        .onChange(of: thread.id) { _, _ in
+        .onValueChange(of: thread.id) { _, _ in
             // The view is reused across threads; anything transient belongs to the thread that was left.
             mediaOnly = false; menuTarget = nil; confirmRecall = nil; confirmBulkDelete = false; dropTargeted = false
             showingSchedule = false; showingEmoji = false; showingComposerMenu = false; showingContactCard = false
@@ -116,7 +116,7 @@ struct ConversationView: View {
         }
         .onDisappear { swipe.remove(); menuMonitor.remove() }
         .background { GeometryReader { proxy in Color.clear.onAppear { columnFrame.value = proxy.frame(in: .global) }
-            .onChange(of: proxy.frame(in: .global)) { _, frame in columnFrame.value = frame } } }
+            .onValueChange(of: proxy.frame(in: .global)) { _, frame in columnFrame.value = frame } } }
         .overlay(alignment: .topLeading) {
             if let target = menuTarget {
                 GeometryReader { proxy in
@@ -360,7 +360,7 @@ struct ConversationView: View {
                     Spacer(minLength:6)
                     if mine && store.supports("set_contact_blocked") {
                         Button("Bỏ chặn") { store.send("set_contact_blocked", parameters: ["user_id": .string(thread.id), "blocked": .bool(false)]) }
-                            .buttonStyle(.bordered).controlSize(.small).buttonBorderShape(.capsule)
+                            .buttonStyle(.bordered).controlSize(.small).capsuleButtonShape()
                     }
                 }
                 .padding(.horizontal,12).padding(.vertical,9)

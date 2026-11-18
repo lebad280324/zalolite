@@ -103,7 +103,7 @@ struct StickerPopover: View {
             ScrollView {
                 if pack == nil && query.isEmpty {
                     if recent.isEmpty {
-                        ContentUnavailableView("Chưa dùng nhãn dán nào", systemImage: "clock", description: Text("Chọn một bộ nhãn dán bên dưới."))
+                        EmptyState("Chưa dùng nhãn dán nào", systemImage: "clock", description: Text("Chọn một bộ nhãn dán bên dưới."))
                             .padding(.top, 40)
                     } else { grid(recent) }
                 } else if store.stickerItems.isEmpty {
@@ -402,7 +402,7 @@ struct SidebarSearchResults: View {
             LazyVStack(alignment: .leading, spacing: 4, pinnedViews: []) {
                 if trimmed.isEmpty {
                     if recentSearches.queries.isEmpty {
-                        ContentUnavailableView("Chưa có tìm kiếm gần đây", systemImage: "clock.arrow.circlepath",
+                        EmptyState("Chưa có tìm kiếm gần đây", systemImage: "clock.arrow.circlepath",
                                                description: Text("Nhập tên, số điện thoại hoặc nội dung tin nhắn."))
                             .padding(.top, 40)
                     } else {
@@ -715,7 +715,7 @@ struct ConversationInfoPanel: View {
             store.requestThreadLibrary(thread)
         }
         // New media in the open conversation refreshes the library while the card is visible.
-        .onChange(of: store.selectedMessages.last?.id) { _, _ in store.requestThreadLibrary(thread) }
+        .onValueChange(of: store.selectedMessages.last?.id) { _, _ in store.requestThreadLibrary(thread) }
     }
 
     private func circleAction(_ icon: String, _ title: String, run: @escaping () -> Void) -> some View {

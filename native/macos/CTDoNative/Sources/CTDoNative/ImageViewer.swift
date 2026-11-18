@@ -88,9 +88,15 @@ struct ImageViewerOverlay: View {
     }
 
     private var magnify: some Gesture {
+        #if LEGACY_MACOS13
+        MagnificationGesture()
+            .onChanged { value in scale = min(range.upperBound, max(range.lowerBound * 0.8, pinchBase * value)) }
+            .onEnded { _ in zoom(to: scale); pinchBase = scale }
+        #else
         MagnifyGesture()
             .onChanged { value in scale = min(range.upperBound, max(range.lowerBound * 0.8, pinchBase * value.magnification)) }
             .onEnded { _ in zoom(to: scale); pinchBase = scale }
+        #endif
     }
 
     private var pan: some Gesture {

@@ -636,7 +636,11 @@ final class TranscriptCell: NSTableCellView {
             host=NSHostingController(rootView:presented)
             // The table owns geometry; content constraints must not feed back into its layout engine.
             host.sizingOptions=[]
+            #if LEGACY_MACOS13
+            if #available(macOS 13.3, *) { host.safeAreaRegions=[] }
+            #else
             host.safeAreaRegions=[]
+            #endif
             host.view.autoresizingMask=[]
             addSubview(host.view)
             controller=host

@@ -97,18 +97,13 @@ struct ReactionChips: View {
             }
             .buttonStyle(.plain)
             .help("Xem ai đã thả cảm xúc")
-            .keyframeAnimator(initialValue: 1.0, trigger: total) { content, scale in
-                content.scaleEffect(reducedMotion ? 1 : scale)
-            } keyframes: { _ in
-                SpringKeyframe(1.28, duration: 0.12)
-                SpringKeyframe(1.0, duration: 0.35, spring: .bouncy)
-            }
+            .reactionPop(trigger: total, reducedMotion: reducedMotion)
             .overlay {
                 if let burst {
                     ReactionBurst(emoji: burst) { self.burst = nil }.allowsHitTesting(false)
                 }
             }
-            .onChange(of: mine) { old, new in
+            .onValueChange(of: mine) { old, new in
                 if let new, new != old, !reducedMotion { burst = new }
             }
             .windowBoundedPopover(isPresented: $showingWho) {
@@ -202,7 +197,7 @@ private struct ReactorsList: View {
         .padding(14).frame(width: 280)
         .fixedSize(horizontal: false, vertical: true)
         // Liquid Glass: the popover shows the conversation through it, like the system's own.
-        .presentationBackground(.ultraThinMaterial)
+        .materialPresentationBackground()
     }
 
     private func tab(_ emoji: String?, _ title: String) -> some View {
@@ -344,8 +339,8 @@ struct PinnedMessagesBar: View {
         .animation(reducedMotion ? nil : .snappy(duration: 0.24), value: expanded)
         .animation(reducedMotion ? nil : .snappy(duration: 0.24), value: pins.count)
         .onAppear { refresh() }
-        .onChange(of: thread.id) { _, _ in expanded = false; refresh() }
-        .onChange(of: pinNoticeKey) { _, _ in refresh() }
+        .onValueChange(of: thread.id) { _, _ in expanded = false; refresh() }
+        .onValueChange(of: pinNoticeKey) { _, _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .showPinnedList)) { note in
             if note.object as? String == thread.id { expanded = true }
         }

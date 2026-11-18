@@ -147,14 +147,14 @@ struct StrangerBanner: View {
                 switch profile.friendship {
                 case "OutgoingPending":
                     if store.supports("undo_friend") {
-                        Button("Thu hồi lời mời") { act("undo_friend") }.buttonStyle(.bordered).controlSize(.small).buttonBorderShape(.capsule)
+                        Button("Thu hồi lời mời") { act("undo_friend") }.buttonStyle(.bordered).controlSize(.small).capsuleButtonShape()
                     }
                 case "IncomingPending":
-                    if store.supports("reject_friend") { Button("Từ chối") { act("reject_friend") }.buttonStyle(.bordered).controlSize(.small).buttonBorderShape(.capsule) }
-                    if store.supports("accept_friend") { Button("Đồng ý") { act("accept_friend") }.buttonStyle(.borderedProminent).controlSize(.small).buttonBorderShape(.capsule) }
+                    if store.supports("reject_friend") { Button("Từ chối") { act("reject_friend") }.buttonStyle(.bordered).controlSize(.small).capsuleButtonShape() }
+                    if store.supports("accept_friend") { Button("Đồng ý") { act("accept_friend") }.buttonStyle(.borderedProminent).controlSize(.small).capsuleButtonShape() }
                 default:
                     if store.supports("add_friend") {
-                        Button("Gửi kết bạn") { act("add_friend") }.buttonStyle(.borderedProminent).controlSize(.small).buttonBorderShape(.capsule)
+                        Button("Gửi kết bạn") { act("add_friend") }.buttonStyle(.borderedProminent).controlSize(.small).capsuleButtonShape()
                             .disabled(store.busy.contains("add_friend"))
                     }
                 }

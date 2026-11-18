@@ -87,7 +87,7 @@ struct MenuBarLabel: View {
 struct MenuBarContent: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
+    @OpenSettingsCompat private var openSettings
 
     private var unreadThreads: [ThreadSnapshot] {
         Array(store.threads.filter { $0.unread > 0 && !$0.hidden && !$0.muted }

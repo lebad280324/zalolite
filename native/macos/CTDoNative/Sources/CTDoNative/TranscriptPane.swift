@@ -82,7 +82,7 @@ struct TranscriptPane<RowContent:View>: View,Equatable {
     }
    }
    .overlay(alignment:.top){if loading && !model.rows.isEmpty {ProgressView().controlSize(.small).padding(.top,topInset+12).allowsHitTesting(false)}}
-   .overlay{if model.rows.isEmpty {if loading{ProgressView("Đang tải tin nhắn…")}else{ContentUnavailableView("Chưa có nội dung",systemImage:"bubble.left",description:Text("Gửi lời chào hoặc tải lịch sử."))}}}
+   .overlay{if model.rows.isEmpty {if loading{ProgressView("Đang tải tin nhắn…")}else{EmptyState("Chưa có nội dung",systemImage:"bubble.left",description:Text("Gửi lời chào hoặc tải lịch sử."))}}}
  }
 }
 

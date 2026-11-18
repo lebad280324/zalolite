@@ -26,7 +26,7 @@ struct InspectorLibrary: View {
             Text("Từ \(store.selectedMessages.count) tin đã tải trong cuộc trò chuyện").font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
-        .onChange(of: tab) { _, value in
+        .onValueChange(of: tab) { _, value in
             expanded = false
             if value == "members", store.supports("get_group_members") { store.threadCommand("get_group_members", thread: thread) }
             if value == "pins", store.supports("list_pinned_topics") { store.threadCommand("list_pinned_topics", thread: thread) }

@@ -348,7 +348,10 @@ mod tests {
     use super::*;
 
     fn fixture() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ai_bridge_{}", crate::param_cipher::random_hex(6)));
+        // Tests run in parallel and `random_hex` is clock-seeded, so a counter keeps each fixture's folder apart.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("ai_bridge_{}_{}_{}", std::process::id(), n, crate::param_cipher::random_hex(6)));
         let account = dir.join("accounts/123");
         std::fs::create_dir_all(&account).unwrap();
         let store = crate::store::MessageStore::open(account.join("native_history.db").to_str().unwrap()).unwrap();

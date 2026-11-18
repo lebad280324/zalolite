@@ -104,8 +104,8 @@ struct CallOverlayView: View {
   }
   .animation(reducedMotion ? nil : .spring(response: 0.38, dampingFraction: 0.8), value: active)
   .animation(reducedMotion ? nil : .spring(response: 0.38, dampingFraction: 0.8), value: incoming == nil)
-  .onChange(of: incoming == nil) { _, ended in ended ? stopRinging() : startRinging() }
-  .onChange(of: state) { _, value in connectedAt = value == "connected" ? (connectedAt ?? Date()) : nil }
+  .onValueChange(of: incoming == nil) { _, ended in ended ? stopRinging() : startRinging() }
+  .onValueChange(of: state) { _, value in connectedAt = value == "connected" ? (connectedAt ?? Date()) : nil }
   .onAppear { if incoming != nil { startRinging() } }
   .onDisappear { stopRinging() }
  }

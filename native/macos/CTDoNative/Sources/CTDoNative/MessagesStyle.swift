@@ -215,7 +215,7 @@ struct EmojiPickerPopover: View {
                         }
                     }.padding(.horizontal, 10).padding(.bottom, 10)
                 }
-                .onChange(of: section) { _, target in withAnimation(.easeOut(duration: 0.2)) { reader.scrollTo(target, anchor: .top) } }
+                .onValueChange(of: section) { _, target in withAnimation(.easeOut(duration: 0.2)) { reader.scrollTo(target, anchor: .top) } }
             }
             Divider()
             HStack(spacing: 0) {

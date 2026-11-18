@@ -303,7 +303,7 @@ struct VoiceCard: View {
                 Image(systemName: playing ? "pause.fill" : "play.fill").font(.system(size: 15, weight: .bold))
                     .foregroundStyle(outgoing ? Color.accentColor : .white)
                     .frame(width: 38, height: 38).background(outgoing ? Color.white : Color.accentColor, in: Circle())
-                    .contentTransition(.symbolEffect(.replace))
+                    .replaceSymbolTransition()
             }.buttonStyle(.plain).help(playing ? "Tạm dừng" : "Phát tin nhắn thoại")
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .center, spacing: 2.5) {
