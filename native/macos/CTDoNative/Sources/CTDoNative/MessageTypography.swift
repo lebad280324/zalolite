@@ -46,9 +46,9 @@ enum MessageTypography {
             guard let range = Range(match.range, in: plain),
                   let lower = AttributedString.Index(range.lowerBound, within: result),
                   let upper = AttributedString.Index(range.upperBound, within: result) else { continue }
-            result[lower..<upper].font = .system(size: MessageTextSize.size(14), weight: .semibold)
+            // Same size and weight as the words around it; only colour sets the tag apart.
             result[lower..<upper].foregroundColor = outgoing ? .white : .accentColor
-            if outgoing { result[lower..<upper].backgroundColor = Color.white.opacity(0.22) }
+            if outgoing { result[lower..<upper].backgroundColor = Color.white.opacity(0.18) }
         }
         return result
     }

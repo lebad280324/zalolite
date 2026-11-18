@@ -5,7 +5,7 @@ import AppKit
 /// server list the phone and Zalo PC use, so moving a conversation shows up everywhere.
 struct PriorityTabs: View {
     @EnvironmentObject private var store: AppStore
-    @AppStorage("nativePrioritySplit") private var prioritySplit = true
+    @AppStorage("nativePrioritySplit") private var prioritySplit = false
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
     @Namespace private var underline
     @State private var lastRefresh = Date.distantPast

@@ -280,12 +280,20 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
             quote = (rect, CGRect(x: 6, y: cy + 5, width: 3, height: rect.height - 10))
             cy = rect.maxY; cw = max(cw, rect.width)
         }
+        // Text under a photo wraps to the photo's width, so the bubble never grows past it.
+        var textInner = inner
         if input.showThumbnails, let url = MediaSource.photo(message) {
-            gap()
             // Avatar, checkbox and opposite-side spacing also consume width in narrow windows.
             let side = min(280, max(1, inner))
-            photo = (CGRect(x: 0, y: cy, width: side, height: (side * 0.75).rounded()), url, bare ? 16 : 10)
-            cy += (side * 0.75).rounded(); cw = max(cw, side)
+            let height = (side * 0.75).rounded()
+            if !bare && cy == 0 && !MediaPresentation.caption(message).isEmpty {
+                // A captioned photo opens the bubble edge to edge; radius 0 means "clip to the bubble".
+                photo = (CGRect(x: -pad, y: -6, width: side + pad * 2, height: height + 6), url, 0)
+            } else {
+                gap()
+                photo = (CGRect(x: 0, y: cy, width: side, height: height), url, bare ? 16 : 10)
+            }
+            cy += height; cw = max(cw, side); textInner = side
         }
         if MediaPresentation.showsLinkPreview(message), let url = safeWebURL(message.linkURL) {
             gap()
@@ -304,7 +312,7 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
         var stampOrigin: CGPoint?
         if !words.isEmpty {
             gap()
-            let block = RowText.block(words, .body, width: inner - 7 - stampWidth, markup: true, spacing: 1.5)
+            let block = RowText.block(words, .body, width: textInner - 7 - stampWidth, markup: true, spacing: 1.5)
             texts.append(.init(block: block, origin: CGPoint(x: 0, y: cy), tone: .primary, moves: true))
             caption = (CGRect(x: 0, y: cy, width: block.size.width, height: block.size.height), block)
             stampOrigin = CGPoint(x: block.size.width + 7, y: cy + block.lastBaseline - stamp.firstBaseline)
@@ -659,15 +667,20 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
             context.addPath(rounded(link.bar, 1.5))
             context.setFillColor((outgoing ? NSColor.white : NSColor.controlAccentColor).cgColor); context.fillPath()
         }
+        // A bare photo shrinks to the image; inside a bubble it fills its frame with no empty bands.
         let photoRect = layout.photo.map { frame in
-            photo.map { MessageMediaGeometry.fitted($0.size, in: frame.rect, outgoing: outgoing) } ?? frame.rect
+            layout.bare ? (photo.map { MessageMediaGeometry.fitted($0.size, in: frame.rect, outgoing: outgoing) } ?? frame.rect) : frame.rect
         }
         let stampOffset: CGFloat = layout.bare && layout.caption == nil
             ? (photoRect?.maxX ?? 0) - (layout.photo?.rect.maxX ?? 0) : 0
         if let frame = layout.photo, frame.rect.intersects(dirty) {
             context.saveGState()
-            context.addPath(rounded(photoRect ?? frame.rect, frame.radius)); context.clip()
-            if let photo { draw(image: photo, in: photoRect ?? frame.rect, fill: false, context: context) }
+            if frame.radius == 0 {
+                context.addPath(bubblePath(layout.bubble, layout.radii)); context.clip(); context.clip(to: frame.rect)
+            } else {
+                context.addPath(rounded(photoRect ?? frame.rect, frame.radius)); context.clip()
+            }
+            if let photo { draw(image: photo, in: photoRect ?? frame.rect, fill: !layout.bare, context: context) }
             else {
                 context.setFillColor(NSColor.labelColor.withAlphaComponent(0.055).cgColor); context.fill(frame.rect)
                 symbol(photoFailed ? "photo.badge.exclamationmark" : "photo", size: 20, weight: .regular, color: .secondaryLabelColor, in: frame.rect)
