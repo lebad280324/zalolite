@@ -348,9 +348,10 @@ enum ChatBackground {
     ]
 
     /// Copies a chosen picture into the app's own folder so the background survives the original moving.
-    static func importImage(from source: URL) throws -> URL {
+    /// `folder` keeps the chat wallpaper and the lock screen picture apart; each holds one picture.
+    static func importImage(from source: URL, folder name: String = "backgrounds") throws -> URL {
         let folder = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/ctdozlite-native/backgrounds", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/ctdozlite-native/\(name)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         guard let image = NSImage(contentsOf: source), let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff), let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {

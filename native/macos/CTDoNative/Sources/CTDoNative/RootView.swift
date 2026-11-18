@@ -13,7 +13,7 @@ struct RootView: View {
     @State private var viewerURL: URL?
     @State private var searchFocusRequest = UUID()
     @StateObject private var recentSearches = RecentSearchHistory()
-    @AppStorage("nativePrioritySplit") private var prioritySplit = true
+    @AppStorage("nativePrioritySplit") private var prioritySplit = false
     @State private var threadMenu: ThreadMenuTarget?
     @State private var hoveredThread = HoverBox()
     @State private var rootFrame = FrameBox()
@@ -32,6 +32,8 @@ struct RootView: View {
             recentSearches.activate(account: account, persistent: !store.demo)
         }
         .toolbarBackground(.hidden, for: .windowToolbar)
+        // The window toolbar holds the conversation header; it must not show over the lock screen.
+        .toolbar(store.isLocked ? .hidden : .visible, for: .windowToolbar)
         .accessibilityHidden(store.isLocked)
         .allowsHitTesting(!store.isLocked)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -255,12 +257,17 @@ struct RootView: View {
                 UpdateToolbarButton()
                 // Shown once a second account is kept on this Mac.
                 if !store.demo, store.savedAccounts.contains(where: { $0.uin != store.session.uin }) { AccountSwitcherButton() }
+                if store.session.loggedIn && !store.demo {
+                    roundControl("power", help: "Khóa Zalolite ngay (⌃⌘L). Mở lại bằng Touch ID hoặc mật khẩu máy.") { store.isLocked = true }
+                }
                 roundControl("magnifyingglass", help: "Tìm liên hệ, số điện thoại và tin nhắn (⌘K)") {
                     searchOpen = true; searchFocusRequest = UUID()
                 }.keyboardShortcut("k", modifiers: .command)
             }
         }
         .frame(width: max(200, sidebarWidth - 84), alignment: .trailing)
+        // Nothing in the toolbar is usable while the workspace is locked.
+        .opacity(store.isLocked ? 0 : 1).allowsHitTesting(!store.isLocked)
         .animation(reducedMotion ? nil : .snappy(duration: 0.24), value: searchOpen)
     }
 

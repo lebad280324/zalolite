@@ -77,20 +77,6 @@ final class NativeSystem: ObservableObject {
  }
 }
 
-struct LockedWorkspace: View {
- @EnvironmentObject var store: AppStore
- @State var failed = false
- var body: some View {
-  VStack(spacing: 18) {
-   Image(systemName: "lock.shield").font(.system(size: 48)).foregroundStyle(.tint)
-   Text("Không gian đã khóa").font(.title2.bold())
-   Text("Xác thực bằng tài khoản macOS để tiếp tục.").foregroundStyle(.secondary)
-   if failed { Text("Chưa mở khóa được. Hãy thử lại bằng tài khoản macOS.").foregroundStyle(.orange) }
-   Button("Mở khóa") { NativeSystem.unlock { if $0 { store.isLocked = false } else { failed = true } } }.buttonStyle(.borderedProminent)
-  }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor)).zIndex(100)
- }
-}
-
 struct CallOverlayView: View {
  @EnvironmentObject var store: AppStore
  @State private var mic = true
