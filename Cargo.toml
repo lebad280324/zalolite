@@ -1,6 +1,6 @@
 [package]
 name = "ctdozlite"
-version = "0.0.14"
+version = "0.0.15"
 edition = "2021"
 authors = ["lebad280324", "TIPC1110 <tienichpc1110@gmail.com>"]
 description = "Zalolite: native macOS Zalo client with SwiftUI/AppKit and a Rust worker"
