@@ -188,7 +188,7 @@ struct ConversationView: View {
         // Resolving a group member scans the member list; do it once per sender, not once per row per frame.
         let identities=IdentityCache()
         return {row in
-            guard NativeRowSupport.supports(row.message) else{return nil}
+            guard row.album.isEmpty, NativeRowSupport.supports(row.message) else{return nil}
             let key=row.message.senderID+"\u{1}"+row.message.senderName
             let identity=identities.values[key] ?? store.senderIdentity(row.message,in:thread)
             identities.values[key]=identity
@@ -231,7 +231,9 @@ struct ConversationView: View {
                             .background(.regularMaterial, in: Capsule())
                             .padding(.top, 12).padding(.bottom, 8).frame(maxWidth: .infinity)
                         }
-                        if message.messageType == "chat.system" {
+                        if message.messageType == "chat.system", let poll = message.pollID {
+                            PollCard(message: message, thread: thread, pollID: poll).id(message.id)
+                        } else if message.messageType == "chat.system" {
                             GroupNoticePill(message: message, thread: thread).id(message.id)
                                 .contextMenu {
                                     Button("Sao chép", systemImage: "doc.on.doc") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(message.text, forType: .string) }
@@ -250,7 +252,7 @@ struct ConversationView: View {
                                        reserveAvatar: !message.isOutgoing,
                                        highlighted: store.highlightedMessageID == message.id, showThumbnails: showThumbnails,
                                        senderName: identity.name, senderAvatar: identity.avatar, senderID: identity.id,
-                                       firstInRun: opensRun, lastInRun: row.endsRun, isGroup: thread.isGroup,
+                                       firstInRun: opensRun, lastInRun: row.endsRun, isGroup: thread.isGroup, album: row.album,
                                        onQuoteJump: { store.jump(toThread: thread.id, messageID: $0) }).equatable()
                         }
                         .offset(x: swipe.messageID == message.id ? swipe.offset : 0)
@@ -499,13 +501,15 @@ struct MessageRow: View, Equatable {
     var firstInRun = true
     var lastInRun = true
     var isGroup = false
+    /// Every photo of a batch sent together; drawn as one grid in place of the single photo.
+    var album: [MessageSnapshot] = []
     var onQuoteJump: (String) -> Void
     @State private var showingProfile = false
     static func ==(lhs: Self, rhs: Self) -> Bool {
         lhs.message == rhs.message && lhs.showSender == rhs.showSender && lhs.showAvatar == rhs.showAvatar &&
         lhs.reserveAvatar == rhs.reserveAvatar && lhs.highlighted == rhs.highlighted && lhs.showThumbnails == rhs.showThumbnails &&
         lhs.senderName == rhs.senderName && lhs.senderAvatar == rhs.senderAvatar && lhs.senderID == rhs.senderID &&
-        lhs.firstInRun == rhs.firstInRun && lhs.lastInRun == rhs.lastInRun
+        lhs.firstInRun == rhs.firstInRun && lhs.lastInRun == rhs.lastInRun && lhs.album == rhs.album
     }
     private var bubbleWidth:CGFloat {min(480,max(100,(columnWidth-32)*0.78))}
     /// A file without caption or quote is shown as a card on its own, outside the bubble.
@@ -519,7 +523,7 @@ struct MessageRow: View, Equatable {
     /// Received bubbles are near-opaque so text stays readable over any wallpaper.
     private var incomingFill: Color { scheme == .dark ? Color(white: 0.17) : .white }
     /// Media-only messages sit directly on the transcript, without a bubble.
-    private var bare: Bool { MediaPresentation.isBareImage(message) && showThumbnails }
+    private var bare: Bool { (MediaPresentation.isBareImage(message) || album.count > 1) && showThumbnails }
     private var caption: String {
         let value=MediaPresentation.caption(message)
         return !showThumbnails && message.imageURL != nil && value.isEmpty ? "[Hình ảnh]" : value
@@ -612,10 +616,17 @@ struct MessageRow: View, Equatable {
                         .onTapGesture { if let original = message.replyToID { onQuoteJump(original) } }
                         .help("Đến tin được trả lời")
                     }
-                    if showThumbnails, let url = MediaSource.photo(message) {
+                    if showThumbnails, album.count > 1 {
+                        PhotoAlbumGrid(photos: album, width: min(420, bubbleWidth))
+                            .overlay(alignment: .bottomTrailing) {
+                                timeLabel.foregroundStyle(.white).padding(.horizontal,7).padding(.vertical,3).background(.black.opacity(0.4),in:Capsule()).padding(7)
+                                    .allowsHitTesting(false)
+                            }
+                    } else if showThumbnails, let url = MediaSource.photo(message) {
                         Button { NotificationCenter.default.post(name: .openImageViewer, object: url) } label: {
+                            // The photo sizes itself; a wider frame here centred it away from the bubble edge.
                             DownsampledPhoto(url:url,outgoing:message.isOutgoing)
-                            .frame(maxWidth: 360, maxHeight: 340).clipShape(RoundedRectangle(cornerRadius: bare ? 16 : 10))
+                            .clipShape(RoundedRectangle(cornerRadius: bare ? 16 : 10))
                             .overlay(alignment: .bottomTrailing) {
                                 if bare { timeLabel.foregroundStyle(.white).padding(.horizontal,7).padding(.vertical,3).background(.black.opacity(0.4),in:Capsule()).padding(7) }
                             }

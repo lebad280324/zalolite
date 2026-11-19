@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ImageIO
+import NativeBridge
 
 private final class ImageTransfer:NSObject,URLSessionDataDelegate,@unchecked Sendable {
  private var bytes=Data()
@@ -31,7 +32,7 @@ private actor PhotoSlots {
  let cache=NSCache<NSURL,NSImage>()
  var pending:[URL:Task<NSImage,Error>]=[:]
  var failures:[URL:Date]=[:]
- init(){cache.totalCostLimit=48*1024*1024;cache.countLimit=160}
+ init(){cache.totalCostLimit=160*1024*1024;cache.countLimit=200}
  func cached(_ url:URL)->NSImage?{cache.object(forKey:url as NSURL)}
  func image(_ url:URL)async throws->NSImage{
   if let image=cache.object(forKey:url as NSURL){return image}
@@ -47,8 +48,7 @@ private actor PhotoSlots {
      // A copy imported from a Zalo export: read it straight from disk (JPEG XL decodes natively).
      data=(try? Data(contentsOf:url,options:.mappedIfSafe)) ?? Data()
     }
-    let delays: [Double] = url.isFileURL ? [] : [0.0, 1.5, 4, 10]
-    for (attempt,delay) in delays.enumerated() {
+    for (attempt,delay) in (url.isFileURL ? [] : [0.0,1.5,4,10]).enumerated() {
      if attempt>0{try? await Task.sleep(nanoseconds:UInt64(delay*1_000_000_000))}
      await PhotoSlots.shared.acquire()
      do {data=try await ImageTransfer.fetch(url)} catch {lastError=error;data=Data()}
@@ -56,7 +56,7 @@ private actor PhotoSlots {
      if !data.isEmpty{break}
     }
     if data.isEmpty{throw lastError}
-    guard let source=CGImageSourceCreateWithData(data as CFData,nil),let cg=CGImageSourceCreateThumbnailAtIndex(source,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,kCGImageSourceThumbnailMaxPixelSize:720,kCGImageSourceCreateThumbnailWithTransform:true,kCGImageSourceShouldCacheImmediately:true] as CFDictionary)else{throw URLError(.cannotDecodeContentData)}
+    guard let source=CGImageSourceCreateWithData(data as CFData,nil),let cg=CGImageSourceCreateThumbnailAtIndex(source,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,kCGImageSourceThumbnailMaxPixelSize:1440,kCGImageSourceCreateThumbnailWithTransform:true,kCGImageSourceShouldCacheImmediately:true] as CFDictionary)else{throw URLError(.cannotDecodeContentData)}
     return NSImage(cgImage:cg,size:NSSize(width:cg.width,height:cg.height))
    };pending[url]=task
   }
@@ -87,5 +87,76 @@ struct DownsampledPhoto: View {
    else{ZStack{Color.primary.opacity(0.055);Image(systemName:failed ? "photo.badge.exclamationmark" : "photo").font(.title2).foregroundStyle(.secondary)}.frame(width:imageWidth,height:imageWidth*0.75)}
   }.task(id:url.absoluteString+String(mediaActive)){guard mediaActive else{return};if loadedURL==url && image != nil{return};image=nil;failed=false;do{let decoded=try await PhotoCache.shared.image(url);guard !Task.isCancelled else{return};image=decoded;loadedURL=url}catch{if !Task.isCancelled{failed=true}}}
 
+ }
+}
+
+/// Photos sent together, drawn as one grid like Zalo: rows of two or three square tiles.
+struct PhotoAlbumGrid: View {
+ let photos: [MessageSnapshot]
+ let width: CGFloat
+ private let gap: CGFloat = 2
+
+ /// Row lengths: threes, with any remainder spread so no row holds a single photo.
+ static func rowSizes(_ count: Int) -> [Int] {
+  switch count {
+  case ..<1: return []
+  case 1, 2, 3: return [count]
+  case 4: return [2, 2]
+  default:
+   switch count % 3 {
+   case 0: return Array(repeating: 3, count: count / 3)
+   case 1: return Array(repeating: 3, count: (count - 4) / 3) + [2, 2]
+   default: return [2] + Array(repeating: 3, count: (count - 2) / 3)
+   }
+  }
+ }
+
+ var body: some View {
+  let sizes = Self.rowSizes(photos.count)
+  let starts = sizes.indices.map { sizes.prefix($0).reduce(0, +) }
+  VStack(spacing: gap) {
+   ForEach(Array(sizes.enumerated()), id: \.offset) { row, size in
+    let side = (width - gap * CGFloat(size - 1)) / CGFloat(size)
+    HStack(spacing: gap) {
+     ForEach(photos[starts[row]..<starts[row] + size], id: \.id) { photo in
+      PhotoTile(message: photo).frame(width: side, height: side)
+     }
+    }
+   }
+  }
+  .frame(width: width)
+  .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+  .accessibilityElement(children: .contain)
+  .accessibilityLabel("\(photos.count) ảnh")
+ }
+}
+
+/// One square tile of an album; the photo fills it and opens in the viewer.
+private struct PhotoTile: View {
+ @Environment(\.transcriptMediaActive) private var mediaActive
+ let message: MessageSnapshot
+ @State private var image: NSImage?
+ @State private var failed = false
+ private var url: URL? { MediaSource.photo(message) }
+ var body: some View {
+  Button { if let url { NotificationCenter.default.post(name: .openImageViewer, object: url) } } label: {
+   ZStack {
+    Color.primary.opacity(0.055)
+    if let image {
+     Image(nsImage: image).resizable().scaledToFill()
+    } else {
+     Image(systemName: failed ? "photo.badge.exclamationmark" : "photo").font(.title3).foregroundStyle(.secondary)
+    }
+   }
+   .clipped()
+   .contentShape(Rectangle())
+  }
+  .buttonStyle(.plain)
+  .help("Xem ảnh")
+  .task(id: (url?.absoluteString ?? "") + String(mediaActive)) {
+   guard mediaActive, let url, image == nil else { return }
+   do { let decoded = try await PhotoCache.shared.image(url); if !Task.isCancelled { image = decoded } }
+   catch { if !Task.isCancelled { failed = true } }
+  }
  }
 }

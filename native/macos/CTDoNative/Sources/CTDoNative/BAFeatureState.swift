@@ -235,3 +235,10 @@ extension AppStore {
         }
     }
 }
+
+/// A member tagged from the mention suggestions; `everyone` is Zalo's ID for "@All".
+struct ComposerMention: Hashable {
+    static let everyone = "-1"
+    let uid: String
+    let name: String
+}

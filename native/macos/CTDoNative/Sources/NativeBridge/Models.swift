@@ -163,6 +163,8 @@ public struct MessageSnapshot: Codable, Identifiable, Hashable, Sendable {
     public var card: JSONValue?
     public var stickerID: UInt64?
     public var stickerCategoryID: UInt64?
+    /// Place of this photo in a batch sent together (Zalo's `group_layout_id`).
+    public var photoGroup: PhotoGroup?
     enum CodingKeys: String, CodingKey {
         case id, text, timestamp, reactions
         case reactionDetails = "reaction_details"
@@ -170,7 +172,7 @@ public struct MessageSnapshot: Codable, Identifiable, Hashable, Sendable {
         case messageType = "msg_type", imageURL = "image_url", fileURL = "file_url", fileName = "file_name"
         case replyToID = "reply_to_id", replyToSender = "reply_to_sender", replyToText = "reply_to_text"
         case linkURL = "link_url", linkTitle = "link_title", linkThumbnail = "link_thumb", linkDescription = "link_desc", localPath = "local_path", card
-        case stickerID = "sticker_id", stickerCategoryID = "sticker_cate_id"
+        case stickerID = "sticker_id", stickerCategoryID = "sticker_cate_id", photoGroup = "photo_group"
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -197,6 +199,7 @@ public struct MessageSnapshot: Codable, Identifiable, Hashable, Sendable {
         card = try? c.decodeIfPresent(JSONValue.self, forKey: .card)
         stickerID = try? c.decodeIfPresent(UInt64.self, forKey: .stickerID)
         stickerCategoryID = try? c.decodeIfPresent(UInt64.self, forKey: .stickerCategoryID)
+        photoGroup = try? c.decodeIfPresent(PhotoGroup.self, forKey: .photoGroup)
     }
     public static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.id == rhs.id &&
@@ -219,10 +222,29 @@ public struct MessageSnapshot: Codable, Identifiable, Hashable, Sendable {
         lhs.linkThumbnail == rhs.linkThumbnail &&
         lhs.linkDescription == rhs.linkDescription &&
         lhs.localPath == rhs.localPath &&
-        lhs.card == rhs.card
+        lhs.card == rhs.card &&
+        lhs.photoGroup == rhs.photoGroup
     }
     public func hash(into hasher: inout Hasher) { hasher.combine(id) }
     public var date: Date { bridgeDate(timestamp) }
+    /// The group poll a vote/create notice refers to.
+    public var pollID: UInt64? {
+        guard case .object(let card)? = card, case .number(let id)? = card["poll_id"], id > 0 else { return nil }
+        return UInt64(exactly: id)
+    }
+}
+
+/// A photo's place in a batch; photos sharing `groupID` are drawn as one grid.
+public struct PhotoGroup: Codable, Hashable, Sendable {
+    public var groupID: String
+    public var index: Int
+    public var total: Int?
+    public var width: Int?
+    public var height: Int?
+    enum CodingKeys: String, CodingKey { case groupID = "group_id", index, total, width, height }
+    public init(groupID: String, index: Int, total: Int? = nil, width: Int? = nil, height: Int? = nil) {
+        self.groupID = groupID; self.index = index; self.total = total; self.width = width; self.height = height
+    }
 }
 
 /// Stable pagination identity, including messages with identical timestamps.

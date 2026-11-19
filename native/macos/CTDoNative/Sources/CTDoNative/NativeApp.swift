@@ -17,7 +17,7 @@ struct CTDoNativeApp: App {
                 .environmentObject(store)
                 .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
                 .frame(minWidth: 760, minHeight: 540)
-                .task { delegate.store = store; store.start(); SoftwareUpdater.shared.checkIfDue(); await exportDemoSnapshotIfRequested(store); await runTranscriptFrameProbeIfRequested(store) }
+                .task { delegate.store = store; ChatHeads.shared.attach(store); store.start(); SoftwareUpdater.shared.checkIfDue(); await exportDemoSnapshotIfRequested(store); await runTranscriptFrameProbeIfRequested(store) }
         }
         .defaultSize(width: 1_180, height: 760)
         .windowToolbarStyle(.unified(showsTitle: false))
@@ -216,7 +216,8 @@ final class NativeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !BackgroundMode.keepRunning }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         BackgroundMode.note("reopen visibleWindows=\(flag)")
-        if !flag { store?.showMainWindow() }
+        // Floating chat bubbles are visible windows too; only the main window counts here.
+        if !NSApp.windows.contains(where: { $0.identifier?.rawValue == "main" && $0.isVisible }) { store?.showMainWindow() }
         return true
     }
 }

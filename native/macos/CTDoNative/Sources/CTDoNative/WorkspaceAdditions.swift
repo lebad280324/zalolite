@@ -28,6 +28,26 @@ enum ComposerAssistText {
         guard let query = mentionQuery(draft) else { return draft }
         return String(draft.dropLast(query.count + 1)) + "@" + name + " "
     }
+    /// UTF-16 ranges of the chosen `@Name` tags still present in the draft, in order of appearance.
+    /// A tag the person has since edited or deleted is no longer found and is not sent.
+    static func mentionRanges(_ draft: String, chosen: [ComposerMention]) -> [(uid: String, pos: Int, len: Int)] {
+        let text = draft as NSString
+        var taken: [NSRange] = []
+        var result: [(uid: String, pos: Int, len: Int)] = []
+        for mention in chosen {
+            let tag = "@" + mention.name
+            var search = NSRange(location: 0, length: text.length)
+            while search.length > 0 {
+                let found = text.range(of: tag, options: [], range: search)
+                guard found.location != NSNotFound else { break }
+                if !taken.contains(where: { NSIntersectionRange($0, found).length > 0 }) {
+                    taken.append(found); result.append((mention.uid, found.location, found.length)); break
+                }
+                search = NSRange(location: found.upperBound, length: text.length - found.upperBound)
+            }
+        }
+        return result.sorted { $0.pos < $1.pos }
+    }
     /// A single short word is the only draft shape that asks for sticker suggestions.
     static func stickerKeyword(_ draft: String) -> String? {
         let word = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -191,10 +211,22 @@ extension AppStore {
     func mentionCandidates(for thread: ThreadSnapshot) -> [FeatureRow] {
         guard thread.isGroup, UserDefaults.standard.bool(forKey: "nativeMentionSuggestions"),
               let query = ComposerAssistText.mentionQuery(draft) else { return [] }
-        return Array((features.members[thread.id] ?? []).filter {
+        var rows = Array((features.members[thread.id] ?? []).filter {
             let name = $0.string("name", "display_name")
-            return !name.isEmpty && (query.isEmpty || name.localizedStandardContains(query))
+            return !name.isEmpty && $0.id != session.uin && (query.isEmpty || name.localizedStandardContains(query))
         }.prefix(6))
+        // "@All" tags everyone in the group, as in Zalo.
+        if query.isEmpty || "all".localizedStandardContains(query) || "tất cả".localizedStandardContains(query) {
+            rows.insert(FeatureRow(value: .object(["id": .string(ComposerMention.everyone), "name": .string("All")])), at: 0)
+        }
+        return rows
+    }
+
+    /// Replaces the typed `@…` with the chosen name and remembers who it tags, so sending notifies them.
+    func insertMention(uid: String, name: String, thread: ThreadSnapshot) {
+        draft = ComposerAssistText.insertingMention(name, into: draft)
+        guard !uid.isEmpty else { return }
+        draftMentions[thread.id, default: []].append(ComposerMention(uid: uid, name: name))
     }
 
     /// Member names load once per group, only after the person starts typing a mention.
@@ -345,12 +377,14 @@ extension AppStore {
     func announceIncoming(previousUnread: [String: Int], hadSnapshot: Bool) {
         let defaults = UserDefaults.standard
         updateDockBadge()
-        // The first snapshot of a session is history, not news.
-        guard hadSnapshot, defaults.bool(forKey: "nativeNotificationsEnabled") else { return }
         let reading = NSRunningApplication.current.isActive && BackgroundMode.mainWindowVisible && !isLocked && workspaceSection == .messages
             && selectedThreadID.map { transcript.positions[$0]?.bottom != false } == true
-        for thread in IncomingMessagePolicy.candidates(threads, previousUnread:previousUnread,
-                hadSnapshot:hadSnapshot, readingThreadID:reading ? selectedThreadID : nil) {
+        let fresh = IncomingMessagePolicy.candidates(threads, previousUnread:previousUnread, hadSnapshot:hadSnapshot,
+                                                     readingThreadID:reading ? selectedThreadID : ChatHeads.shared.readingThreadID)
+        if !demo { ChatHeads.shared.noteIncoming(fresh) }
+        // The first snapshot of a session is history, not news.
+        guard hadSnapshot, defaults.bool(forKey: "nativeNotificationsEnabled") else { return }
+        for thread in fresh {
             let showPreview = defaults.bool(forKey: "nativeNotificationPreview") && !isLocked
             postNotification(id: "message-\(session.uin)-\(thread.id)", title: showPreview ? thread.name : "Zalolite",
                              body: showPreview && !thread.lastMessage.isEmpty ? thread.lastMessage : "Bạn có tin nhắn mới", threadID: thread.id)
@@ -473,7 +507,7 @@ struct ComposerAssist: View {
                     HStack(spacing: 8) {
                         ForEach(members) { row in
                             let name = row.string("name", "display_name")
-                            Button { store.draft = ComposerAssistText.insertingMention(name, into: store.draft) } label: {
+                            Button { store.insertMention(uid: row.id, name: name, thread: thread) } label: {
                                 HStack(spacing: 6) {
                                     AvatarView(name: name, url: row.string("avatar"), size: 20)
                                     Text(verbatim: name).font(.caption).lineLimit(1)
@@ -481,7 +515,6 @@ struct ComposerAssist: View {
                                     .background(.primary.opacity(0.05), in: Capsule())
                             }.buttonStyle(.plain)
                         }
-                        Text("Chèn tên dạng văn bản").font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
             }

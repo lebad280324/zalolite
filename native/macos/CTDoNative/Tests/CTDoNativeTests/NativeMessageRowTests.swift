@@ -173,4 +173,15 @@ final class NativeMessageRowTests: XCTestCase {
     private func rows(_ values: [[String: Any]]) throws -> [TranscriptRow] {
         TranscriptLayout.rows(try JSONDecoder().decode([MessageSnapshot].self, from: JSONSerialization.data(withJSONObject: values)))
     }
+
+    func testAlbumRowsNeverLeaveASinglePhotoAlone() {
+        for count in 2...12 {
+            let rows = PhotoAlbumGrid.rowSizes(count)
+            XCTAssertEqual(rows.reduce(0, +), count)
+            XCTAssertTrue(rows.allSatisfy { (2...3).contains($0) }, "\(count): \(rows)")
+        }
+        XCTAssertEqual(PhotoAlbumGrid.rowSizes(4), [2, 2])
+        XCTAssertEqual(PhotoAlbumGrid.rowSizes(5), [2, 3])
+        XCTAssertEqual(PhotoAlbumGrid.rowSizes(7), [3, 2, 2])
+    }
 }

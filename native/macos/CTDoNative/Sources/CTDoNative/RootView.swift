@@ -231,7 +231,7 @@ struct RootView: View {
         }
     }
 
-    /// Three round glass controls; search widens into a field and hides the other two.
+    /// A search field with round glass controls beside it; once opened, search takes the whole row.
     private var sidebarControls: some View {
         HStack(spacing: 10) {
             if searchOpen {
@@ -251,7 +251,19 @@ struct RootView: View {
                 roundControl("xmark", help: "Đóng tìm kiếm (Esc)") { closeSearch() }.keyboardShortcut(.cancelAction)
             } else {
                 // New chat, views, filters and the account live in the menu bar (Tệp, Xem, Zalolite).
-                Spacer(minLength: 0)
+                // The free width is the search field itself, so a click anywhere on it starts a search.
+                Button { searchOpen = true; searchFocusRequest = UUID() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        Text("Tìm kiếm").foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12).frame(height: 36).frame(maxWidth: .infinity)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain).nativeGlass(18)
+                .help("Tìm liên hệ, số điện thoại và tin nhắn (⌘K)")
+                .keyboardShortcut("k", modifiers: .command)
                 // Appears only when GitHub Releases has a newer Zalolite.
                 UpdateToolbarButton()
                 // Shown once a second account is kept on this Mac.
@@ -259,9 +271,6 @@ struct RootView: View {
                 if store.session.loggedIn && !store.demo {
                     roundControl("power", help: "Khóa Zalolite ngay (⌃⌘L). Mở lại bằng Touch ID hoặc mật khẩu máy.") { store.isLocked = true }
                 }
-                roundControl("magnifyingglass", help: "Tìm liên hệ, số điện thoại và tin nhắn (⌘K)") {
-                    searchOpen = true; searchFocusRequest = UUID()
-                }.keyboardShortcut("k", modifiers: .command)
             }
         }
         .frame(width: max(200, sidebarWidth - 84), alignment: .trailing)
@@ -491,6 +500,7 @@ struct ThreadContextMenu: View {
             }
         }
         Button("Tải lại tin nhắn", systemImage: "arrow.clockwise") { store.loadMessages(thread) }
+        Button("Mở bong bóng chat", systemImage: "bubble.left.circle") { ChatHeads.shared.open(thread.id) }
         ThreadManagementMenu(thread: thread)
     }
 }

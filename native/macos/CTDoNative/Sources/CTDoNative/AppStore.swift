@@ -123,6 +123,9 @@ final class AppStore: ObservableObject {
     var pendingPreviews: [String: String] = [:]
     var pendingSaves: [String: String] = [:]
     @Published var fileDownloadsVersion = 0
+    /// Group polls loaded for notices on screen, by poll ID.
+    @Published var polls: [UInt64: PollSnapshot] = [:]
+    var pollRequested: [UInt64: Date] = [:]
     var stickerArtCategories: Set<UInt64> = []
     @Published var scheduledMessages: [ScheduledMessage] = []
     var forwardMessage: MessageSnapshot?
@@ -132,6 +135,8 @@ final class AppStore: ObservableObject {
     private var pending: [String: Pending] = [:]
     private var timeouts: [String: Task<Void, Never>] = [:]
     var drafts: [String: String] = [:]
+    /// Members tagged from the suggestions in each conversation's draft.
+    var draftMentions: [String: [ComposerMention]] = [:]
     var historyLimits: [String: Int] = [:]
     var historyCursors: [String: HistoryCursor] = [:]
     var historyHasMore: [String: Bool] = [:]
@@ -314,8 +319,10 @@ final class AppStore: ObservableObject {
     /// Only foreground reading at the latest message sends a read receipt.
     func markSelectedReadIfVisible() {
         // A closed or hidden window is not reading; never send "seen" from the background.
-        guard !demo, NSRunningApplication.current.isActive, BackgroundMode.mainWindowVisible, !isLocked, workspaceSection == .messages,
-              let thread = selectedThread, thread.hasUnread, supports("mark_seen"),
+        guard !demo, !isLocked, workspaceSection == .messages, let thread = selectedThread,
+              // The main window in front, or the small chat of a floating bubble open on this conversation.
+              NSRunningApplication.current.isActive && BackgroundMode.mainWindowVisible || ChatHeads.shared.readingThreadID == thread.id,
+              thread.hasUnread, supports("mark_seen"),
               !(messages[thread.id] ?? []).isEmpty, transcript.positions[thread.id]?.bottom != false,
               !pending.values.contains(where: { $0.command == "mark_seen" && $0.threadID == thread.id }) else { return }
         threadCommand("mark_seen", thread: thread)
@@ -397,6 +404,12 @@ final class AppStore: ObservableObject {
         guard supports(command) else { return }
         var parameters: [String: JSONValue] = ["thread_id": .string(thread.id), "is_group": .bool(thread.isGroup), "text": .string(draft)]
         if let quote { parameters["message_id"] = .string(quote.id) }
+        if thread.isGroup, quote == nil, let chosen = draftMentions[thread.id], !chosen.isEmpty {
+            let ranges = ComposerAssistText.mentionRanges(draft, chosen: chosen)
+            if !ranges.isEmpty {
+                parameters["mentions"] = .array(ranges.map { .object(["uid": .string($0.uid), "pos": .number(Double($0.pos)), "len": .number(Double($0.len))]) })
+            }
+        }
         send(command, parameters: parameters, threadID: thread.id, submittedText: draft)
     }
 
@@ -445,6 +458,15 @@ final class AppStore: ObservableObject {
     func forward(to target: ThreadSnapshot) {
         guard let message = forwardMessage, let source = forwardSourceThread else { return }
         for item in forwardQueue.isEmpty ? [message] : forwardQueue {
+            // The core forwards text and stickers; photos, videos and files are sent again as attachments.
+            if item.messageType != "chat.sticker", supports("send_attachment"), let media = ForwardMedia.source(item) {
+                ForwardMedia.prepare(media, message: item) { [weak self] file in
+                    guard let self, let file else { self?.error = "Không tải được tệp để chuyển tiếp. Hãy thử lại."; return }
+                    self.send("send_attachment", parameters: ["thread_id": .string(target.id), "is_group": .bool(target.isGroup),
+                        "path": .string(file.path), "caption": .string(ForwardMedia.caption(item))], threadID: target.id)
+                }
+                continue
+            }
             threadCommand("forward_message", thread: source, parameters: ["message_id": .string(item.id),
                 "target_thread_id": .string(target.id), "target_is_group": .bool(target.isGroup)])
         }
@@ -694,6 +716,7 @@ final class AppStore: ObservableObject {
         if action.command == "get_privacy_guard" || action.command == "set_privacy_guard" { privacyGuard = event.data }
         if ["get_account_settings", "set_account_setting", "set_two_factor"].contains(action.command) { accountSettings = event.data }
         if action.command == "list_media_devices" || action.command == "select_media_devices" { mediaDevices = event.data }
+        if action.command == "poll_detail" || action.command == "poll_vote" { handlePollResult(event.data) }
         do {
             switch action.command {
             case "lookup_phone": contactResult = event.data
@@ -744,6 +767,7 @@ final class AppStore: ObservableObject {
         if let text = action.submittedText, let threadID = action.threadID {
             if selectedThreadID == threadID && draft == text { draft = ""; quote = nil }
             if drafts[threadID] == text { drafts[threadID] = "" }
+            if ["send_message", "send_quote"].contains(action.command) { draftMentions[threadID] = nil }
         }
         if ["send_message", "send_quote", "send_attachment", "send_sticker", "react", "recall_message", "delete_message"].contains(action.command),
            let thread = threads.first(where: { $0.id == action.threadID }) { loadMessages(thread) }

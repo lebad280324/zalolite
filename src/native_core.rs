@@ -44,6 +44,8 @@ const CAPABILITIES: &[&str] = &[
     "react",
     "recall_message",
     "delete_message",
+    "poll_detail",
+    "poll_vote",
     "sync_history",
     "mark_seen",
     "pin_thread",
@@ -94,6 +96,9 @@ enum Command {
         #[serde(default)]
         is_group: bool,
         text: String,
+        /// Members tagged with `@Name` in a group; they are notified like in Zalo.
+        #[serde(default)]
+        mentions: Vec<chat::Mention>,
     },
     SendAttachment {
         thread_id: String,
@@ -128,6 +133,17 @@ enum Command {
         #[serde(default)]
         is_group: bool,
         message_id: String,
+    },
+    /// Question, options and votes of a group poll (re-notes/74).
+    PollDetail {
+        thread_id: String,
+        poll_id: u64,
+    },
+    /// Replace this account's choice in a group poll.
+    PollVote {
+        thread_id: String,
+        poll_id: u64,
+        option_ids: Vec<u64>,
     },
     SyncHistory {
         thread_id: String,
@@ -310,6 +326,8 @@ impl Command {
             Self::React { .. } => "react",
             Self::RecallMessage { .. } => "recall_message",
             Self::DeleteMessage { .. } => "delete_message",
+            Self::PollDetail { .. } => "poll_detail",
+            Self::PollVote { .. } => "poll_vote",
             Self::SyncHistory { .. } => "sync_history",
             Self::MarkSeen { .. } => "mark_seen",
             Self::PinThread { .. } => "pin_thread",
@@ -413,6 +431,9 @@ struct MessageDto {
     /// Contact or call card read from the attachment (re-notes/65).
     #[serde(skip_serializing_if = "Option::is_none")]
     card: Option<serde_json::Value>,
+    /// Batch placement of a photo, so the UI can draw the batch as one grid.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    photo_group: Option<chat::PhotoLayout>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -619,6 +640,58 @@ fn web_url(value: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Poll errors reach the UI as plain Vietnamese; server bodies are never forwarded.
+fn poll_error(error: &anyhow::Error) -> &'static str {
+    if SessionStatus::from_error(error) == SessionStatus::Expired {
+        "Phiên đăng nhập đã hết hạn. Hãy quét mã QR để đăng nhập lại."
+    } else {
+        "Không tải được cuộc bình chọn. Hãy thử lại."
+    }
+}
+
+/// The poll fields the UI draws (Zalo PC poll model: question, options, joined, closed,
+/// allow_multi_choices, allow_add_new_option, expired_time, num_vote, creator).
+fn poll_dto(data: &Value) -> Value {
+    let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).unwrap_or_default().chars().take(2_000).collect::<String>();
+    let number = |value: &Value, key: &str| value.get(key).and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok())).unwrap_or(0);
+    let flag = |value: &Value, key: &str| value.get(key).is_some_and(|v| v.as_bool().unwrap_or_else(|| v.as_i64() == Some(1)));
+    let options: Vec<Value> = data
+        .get("options")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(100)
+        .map(|option| {
+            let voters: Vec<String> = option
+                .get("voters")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned).or_else(|| v.as_u64().map(|n| n.to_string())))
+                .take(500)
+                .collect();
+            json!({
+                "option_id": number(option, "option_id"),
+                "content": text(option, "content"),
+                "votes": number(option, "votes"),
+                "voted": flag(option, "voted"),
+                "voters": voters,
+            })
+        })
+        .collect();
+    json!({
+        "poll_id": number(data, "poll_id"),
+        "question": text(data, "question"),
+        "creator": text(data, "creator"),
+        "options": options,
+        "joined": flag(data, "joined"),
+        "closed": flag(data, "closed"),
+        "multiple": flag(data, "allow_multi_choices"),
+        "num_vote": number(data, "num_vote"),
+        "expired_time": number(data, "expired_time"),
+    })
+}
+
 fn message_dto(message: &ChatMessage) -> MessageDto {
     let mut hydrated = message.clone();
     hydrated.hydrate_media_metadata();
@@ -647,7 +720,7 @@ fn message_dto(message: &ChatMessage) -> MessageDto {
         id: hydrated.id.clone(),
         sender_id,
         sender_name: hydrated.sender.clone(),
-        text: hydrated.text.clone(),
+        text: chat::display_emoticons(&hydrated.text).into_owned(),
         timestamp: hydrated.ts,
         is_outgoing: hydrated.is_outgoing,
         msg_type: if is_notice {
@@ -695,7 +768,8 @@ fn message_dto(message: &ChatMessage) -> MessageDto {
         link_desc: hydrated.link_desc.clone(),
         local_path: hydrated.local_path.clone().filter(|path| path.starts_with('/') && !path.contains("/../")),
         link_thumb: web_url(hydrated.link_thumb.as_deref()),
-        card: hydrated.card.clone().filter(|_| card_kind == "contact" || card_kind == "call"),
+        card: hydrated.card.clone().filter(|card| card_kind == "contact" || card_kind == "call" || card.get("poll_id").is_some()),
+        photo_group: hydrated.photo_layout.clone().filter(|_| is_photo),
     }
 }
 
@@ -994,7 +1068,7 @@ impl Core {
                 pinned: self.pinned.contains(&thread.id) || thread.presentation.pinned,
                 muted: thread.unread.is_muted(),
                 hidden: thread.presentation.hidden,
-                last_message: thread.sidebar_preview(),
+                last_message: chat::display_emoticons(&thread.sidebar_preview()).into_owned(),
                 last_message_ts: thread.sidebar_activity_ts(),
             }})
             .collect();
@@ -1275,6 +1349,30 @@ impl Core {
     /// (type 23); a web-type request returns a different key (re-notes/71). The stored key is
     /// checked against the export's first tar header; when it does not open the file, the PC
     /// key is requested, verified the same way, and persisted with the session (secret).
+    /// Sessions signed in before poll support never kept the `group_poll` host; the account's
+    /// service map from `getLoginInfo` names it. Only that host is taken from the reply.
+    async fn ensure_poll_host(&mut self) -> Result<()> {
+        if !self.session.domains.group_poll.is_empty() {
+            return Ok(());
+        }
+        let info = crate::login::get_login_info(&self.session).await?;
+        let data = info.get("data").unwrap_or(&info);
+        let map = data.get("zpw_service_map_v3").or_else(|| data.get("zpw_service_map_new"));
+        let host = map
+            .and_then(|map| map.get("group_poll"))
+            .and_then(|hosts| hosts.as_array().and_then(|list| list.first()).or(Some(hosts)))
+            .and_then(Value::as_str)
+            .filter(|host| host.starts_with("https://"))
+            .map(|host| host.trim_end_matches('/').to_owned());
+        let Some(host) = host else {
+            bail!(UserError("Zalo chưa cung cấp máy chủ bình chọn cho phiên này. Hãy đăng nhập lại."));
+        };
+        self.session.domains.group_poll = host;
+        let session = self.session.clone();
+        tokio::task::spawn_blocking(move || session.save_to_file("session.json")).await??;
+        Ok(())
+    }
+
     async fn ensure_export_key(&mut self, path: &str) -> Result<()> {
         if crate::zalo_backup::ContainerVersion::from_path(Path::new(path)).is_none() {
             return Ok(());
@@ -1425,10 +1523,12 @@ impl Core {
         is_group: bool,
         text: &str,
         quoted: Option<ChatMessage>,
+        mentions: &[chat::Mention],
     ) -> Result<Value> {
         self.require_login()?;
         self.known_thread(thread_id, is_group)?;
         require_text(text)?;
+        let mention_info = if is_group && quoted.is_none() { chat::mention_info(text, mentions) } else { None };
         let client_id = chat::next_client_message_id();
         let (message_id, timestamp) = if self.demo {
             self.next_demo_id += 1;
@@ -1447,6 +1547,9 @@ impl Core {
                     client_id,
                 )
                 .await?
+            } else if let Some(info) = &mention_info {
+                chat::send_group_mention_with_client_id(&self.session, thread_id, text, info, client_id)
+                    .await?
             } else if is_group {
                 chat::send_group_message_with_client_id(&self.session, thread_id, text, client_id)
                     .await?
@@ -1582,7 +1685,8 @@ impl Core {
                 thread_id,
                 is_group,
                 text,
-            } => self.send_text(thread_id, *is_group, text, None).await,
+                mentions,
+            } => self.send_text(thread_id, *is_group, text, None, mentions).await,
             Command::SendQuote {
                 thread_id,
                 is_group,
@@ -1590,7 +1694,7 @@ impl Core {
                 message_id,
             } => {
                 let quoted = self.known_message(thread_id, *is_group, message_id)?;
-                self.send_text(thread_id, *is_group, text, Some(quoted))
+                self.send_text(thread_id, *is_group, text, Some(quoted), &[])
                     .await
             }
             Command::SendAttachment {
@@ -1785,6 +1889,25 @@ impl Core {
                 self.persist_best_effort().await?;
                 self.publish().await?;
                 Ok(json!({"added": added}))
+            }
+            Command::PollDetail { thread_id, poll_id } | Command::PollVote { thread_id, poll_id, .. } => {
+                self.require_login()?;
+                self.known_thread(thread_id, true)?;
+                if self.demo {
+                    return Err(UserError("Chế độ minh họa không mở được cuộc bình chọn.").into());
+                }
+                self.ensure_poll_host().await?;
+                let data = if let Command::PollVote { option_ids, .. } = command {
+                    if option_ids.is_empty() || option_ids.len() > 100 {
+                        return Err(UserError("Hãy chọn ít nhất một lựa chọn.").into());
+                    }
+                    chat::poll_vote(&self.session, *poll_id, option_ids).await.map_err(|error| anyhow!(UserError(poll_error(&error))))?;
+                    chat::poll_detail(&self.session, *poll_id).await
+                } else {
+                    chat::poll_detail(&self.session, *poll_id).await
+                }
+                .map_err(|error| anyhow!(UserError(poll_error(&error))))?;
+                Ok(json!({"thread_id": thread_id, "poll_id": poll_id, "poll": poll_dto(&data)}))
             }
             Command::MarkSeen {
                 thread_id,
@@ -2554,6 +2677,20 @@ async fn export_key_opens(path: &str, key: &str, own_uid: &str) -> Result<bool> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn poll_dto_keeps_only_drawn_fields() {
+        let data = json!({"poll_id": 7, "question": "Đi đâu?", "creator": "1", "joined": true, "closed": 0,
+            "allow_multi_choices": 1, "num_vote": 3, "expired_time": 0, "secret": "x",
+            "options": [{"option_id": 11, "content": "Biển", "votes": 2, "voted": true, "voters": ["1", 2]},
+                        {"option_id": "12", "content": "Núi", "votes": 1, "voted": false, "voters": []}]});
+        let dto = poll_dto(&data);
+        assert_eq!(dto["multiple"], json!(true));
+        assert_eq!(dto["closed"], json!(false));
+        assert_eq!(dto["options"][1]["option_id"], json!(12));
+        assert_eq!(dto["options"][0]["voters"], json!(["1", "2"]));
+        assert!(dto.get("secret").is_none());
+    }
+
     use super::*;
 
     #[tokio::test]
@@ -2802,7 +2939,7 @@ mod tests {
         let original = core.threads[1].messages.clone();
         let quote = core.threads[0].messages[0].clone();
         let result = core
-            .send_text("demo-group", true, "Cảm ơn", Some(quote.clone()))
+            .send_text("demo-group", true, "Cảm ơn", Some(quote.clone()), &[])
             .await
             .unwrap();
         let id = result["message_id"].as_str().unwrap().to_string();
@@ -2833,7 +2970,7 @@ mod tests {
         assert!(!core.logged_in());
         assert!(core.threads.is_empty());
         assert!(core
-            .send_text("demo-person", false, "hello", None)
+            .send_text("demo-person", false, "hello", None, &[])
             .await
             .is_err());
     }

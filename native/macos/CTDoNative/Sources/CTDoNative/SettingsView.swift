@@ -13,7 +13,8 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
  /// Individual options on the page, so search finds a setting and not only a page title.
  var keywords: [String] {
   switch self {
-  case .general: return ["Ngôn ngữ", "Mở khi đăng nhập macOS", "Ghi nhớ tài khoản", "Kết nối lại"]
+  case .general: return ["Ngôn ngữ", "Mở khi đăng nhập macOS", "Ghi nhớ tài khoản", "Kết nối lại", "Chạy nền",
+                         "Bong bóng chat", "Bong bóng trò chuyện nổi", "Chat head", "Biểu tượng thanh menu", "Ẩn biểu tượng Dock"]
   case .updates: return ["Phiên bản", "Kiểm tra cập nhật", "Tự động kiểm tra", "Bản mới"]
   case .security: return ["Khóa ứng dụng", "Hình nền màn hình khóa", "Phím tắt khóa", "Bảo mật hai lớp", "Đăng xuất", "Mã PIN hội thoại ẩn"]
   case .privacy: return ["Ngày sinh", "Trạng thái truy cập", "Trạng thái đã xem", "Người được nhắn tin", "Người được gọi", "Danh sách chặn", "Tìm qua số điện thoại", "Nguồn kết bạn", "Đang soạn"]
@@ -27,7 +28,12 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   case .ai: return ["Trợ lý AI", "Codex", "Claude", "MCP", "Chia sẻ hội thoại", "Tổng hợp công việc"]
   }
  }
- func match(_ query: String) -> String? { keywords.first { $0.localizedStandardContains(query) } }
+ /// A keyword matches when it contains every word typed, in any order, ignoring case and accents.
+ func match(_ query: String) -> String? {
+  let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+  guard !words.isEmpty else { return nil }
+  return keywords.first { keyword in words.allSatisfy { keyword.localizedStandardContains($0) } }
+ }
  /// Tile colours follow the system settings palette so pages are recognisable at a glance.
  var tint: Color {
   switch self {
@@ -88,6 +94,7 @@ struct SettingsView: View {
  @AppStorage("nativeImportMedia") private var importMedia = false
  @AppStorage(BackgroundMode.menuBarKey) private var menuBarIcon = true
  @AppStorage(BackgroundMode.hideDockKey) private var hideDock = false
+ @AppStorage(ChatHeads.enabledKey) private var chatHeads = true
  @AppStorage("nativeDownloadDirectory") private var downloadDirectory = ""
  private var pages: [SettingsPage] {
   SettingsPage.allCases.filter { search.isEmpty || $0.rawValue.localizedStandardContains(search) || $0.match(search) != nil }
@@ -178,7 +185,8 @@ struct SettingsView: View {
     Toggle("Tiếp tục chạy nền khi đóng cửa sổ", isOn: $keepRunning)
     Toggle("Hiện biểu tượng trên thanh menu", isOn: $menuBarIcon)
     Toggle("Ẩn biểu tượng Dock khi đã đóng cửa sổ", isOn: $hideDock).disabled(!keepRunning || !menuBarIcon)
-    Text("Khi chạy nền, Zalolite vẫn giữ kết nối để nhận tin nhắn, cuộc gọi đến và đồng bộ với điện thoại; trạng thái truy cập hiển thị theo mục Quyền riêng tư. Chọn Thoát Zalolite (⌘Q) để ngắt hẳn.").font(.caption).foregroundStyle(.secondary)
+    Toggle("Bong bóng chat khi có tin nhắn mới", isOn: $chatHeads)
+    Text("Khi chạy nền, Zalolite vẫn giữ kết nối để nhận tin nhắn, cuộc gọi đến và đồng bộ với điện thoại; trạng thái truy cập hiển thị theo mục Quyền riêng tư. Bong bóng chat hiện ở mép màn hình khi bạn đang ở ứng dụng khác; bấm vào để trả lời ngay, kéo để đổi vị trí. Chọn Thoát Zalolite (⌘Q) để ngắt hẳn.").font(.caption).foregroundStyle(.secondary)
    }
    Section("Khởi động") { Toggle("Mở khi đăng nhập macOS", isOn: Binding(get: { system.launchAtLogin }, set: { system.setLaunchAtLogin($0) })); Text("macOS có thể yêu cầu cho phép trong Mục đăng nhập.").font(.caption).foregroundStyle(.secondary) }
    Section("Kết nối") { LabeledContent("Trạng thái", value: store.connection); Button("Kết nối lại bộ xử lý") { store.restart() } }
@@ -293,7 +301,7 @@ struct SettingsView: View {
    Section("Cuộc gọi đến") { Toggle("Thông báo khi có cuộc gọi đến lúc ứng dụng ở nền", isOn: $callNotifications); Text("Nếu thiếu micrô hoặc camera, cuộc gọi báo lỗi thay vì kết nối im lặng.").font(.caption).foregroundStyle(.secondary) }
    Section("Quyền thiết bị") { Text("macOS sẽ xin quyền micrô hoặc camera khi bạn chủ động thực hiện cuộc gọi.").font(.callout).foregroundStyle(.secondary) }
   case .utilities:
-   Section("Soạn nhanh") { Toggle("Gợi ý nhãn dán khi gõ", isOn: $stickerSuggestions); Text("Khi bật, từ đơn bạn đang gõ được gửi tới Zalo để tìm nhãn dán phù hợp.").font(.caption).foregroundStyle(.secondary); Toggle("Gợi ý tên thành viên khi gõ @", isOn: $mentionSuggestions); Text("Tên được chèn dưới dạng văn bản; chưa tạo thông báo nhắc tên cho người được nhắc.").font(.caption).foregroundStyle(.secondary); Button("Mở Emoji & Ký hiệu") { NSApp.orderFrontCharacterPalette(nil) }; unavailable("Tìm GIF chưa có nguồn tích hợp được xác nhận.") }
+   Section("Soạn nhanh") { Toggle("Gợi ý nhãn dán khi gõ", isOn: $stickerSuggestions); Text("Khi bật, từ đơn bạn đang gõ được gửi tới Zalo để tìm nhãn dán phù hợp.").font(.caption).foregroundStyle(.secondary); Toggle("Gợi ý tên thành viên khi gõ @", isOn: $mentionSuggestions); Text("Chọn tên trong gợi ý để nhắc: người được nhắc nhận thông báo như trên Zalo. @All nhắc cả nhóm.").font(.caption).foregroundStyle(.secondary); Button("Mở Emoji & Ký hiệu") { NSApp.orderFrontCharacterPalette(nil) }; unavailable("Tìm GIF chưa có nguồn tích hợp được xác nhận.") }
    Section("Chụp màn hình") {
     TextField("⌘⌥ + phím để chụp", text: $captureKey).onValueChange(of: captureKey) { _, value in captureKey = String(value.lowercased().prefix(1)) }
     TextField("⌘⌥ + phím để ẩn app rồi chụp", text: $captureHiddenKey).onValueChange(of: captureHiddenKey) { _, value in captureHiddenKey = String(value.lowercased().prefix(1)) }

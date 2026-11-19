@@ -75,6 +75,52 @@ pub struct ChatMessage {
     pub history_source: Option<Value>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub resolved_mention_uids: std::collections::BTreeMap<String, String>,
+    /// Place of a photo in a batch sent together, which Zalo shows as one grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_layout: Option<PhotoLayout>,
+}
+
+/// Zalo marks each photo of a batch with `params.group_layout_id`, `id_in_group` and
+/// `total_item_in_group`; `width`/`height` give the original proportions.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PhotoLayout {
+    pub group_id: String,
+    pub index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+}
+
+/// Reads the batch placement of a photo from its content (`params` may be a JSON string).
+pub(crate) fn photo_layout(content: &Value) -> Option<PhotoLayout> {
+    fn as_json(value: &Value) -> Option<Value> {
+        match value {
+            Value::String(text) if text.trim_start().starts_with('{') => serde_json::from_str(text).ok(),
+            Value::Object(_) => Some(value.clone()),
+            _ => None,
+        }
+    }
+    fn number(value: Option<&Value>) -> Option<u64> {
+        let value = value?;
+        value.as_u64().or_else(|| value.as_str()?.trim().parse().ok())
+    }
+    let content = as_json(content)?;
+    let params = as_json(content.get("params")?)?;
+    let group = number(params.get("group_layout_id"))?;
+    if group == 0 {
+        return None;
+    }
+    let small = |key: &str| number(params.get(key)).and_then(|n| u32::try_from(n).ok());
+    Some(PhotoLayout {
+        group_id: group.to_string(),
+        index: small("id_in_group").unwrap_or(0),
+        total: small("total_item_in_group").filter(|n| *n > 0),
+        width: small("width").filter(|n| *n > 0),
+        height: small("height").filter(|n| *n > 0),
+    })
 }
 
 impl ChatMessage {
@@ -105,8 +151,16 @@ impl ChatMessage {
         if incoming.history_source.is_some() {
             self.history_source = incoming.history_source.clone();
         }
-        // A cached copy parsed before rich cards were read takes the card and its wording.
-        let card_changed = self.card.is_none() && incoming.card.is_some();
+        // History stored before batch placement was read gains it from the next server copy.
+        let layout_changed = self.photo_layout.is_none() && incoming.photo_layout.is_some();
+        if layout_changed {
+            self.photo_layout = incoming.photo_layout.clone();
+        }
+        // A cached copy parsed before rich cards were read takes the card and its wording;
+        // a notice cached before poll IDs were kept gains its poll.
+        let card_changed = (self.card.is_none() && incoming.card.is_some())
+            || (incoming.card.as_ref().is_some_and(|card| card.get("poll_id").is_some())
+                && self.card.as_ref().is_none_or(|card| card.get("poll_id").is_none()));
         if card_changed {
             self.card = incoming.card.clone();
             self.text = incoming.text.clone();
@@ -118,6 +172,7 @@ impl ChatMessage {
         }
         self.delivery = self.delivery.merge(incoming.delivery);
         card_changed
+            || layout_changed
             || previous_mentions != self.resolved_mention_uids
             || before
                 != (
@@ -1023,6 +1078,9 @@ pub fn merge_thread_into(
                 existing_msg.link_url = None;
                 existing_msg.link_thumb = None;
             }
+            if existing_msg.photo_layout.is_none() && msg.photo_layout.is_some() {
+                existing_msg.photo_layout = msg.photo_layout.clone();
+            }
             if existing_msg.sticker_id.is_none() && msg.sticker_id.is_some() {
                 existing_msg.sticker_id = msg.sticker_id;
                 existing_msg.sticker_cate_id = msg.sticker_cate_id;
@@ -1666,6 +1724,145 @@ pub(crate) async fn send_group_message_with_client_id(
     );
     let form = format!("params={params}");
     let resp = s.post_form(&url, form).await?;
+    let resp = s.maybe_decrypt(resp, s.session_key_bytes()).await;
+    if let Some(code) = resp.get("error_code").and_then(Value::as_i64) {
+        if code != 0 {
+            let msg = resp
+                .get("error_message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            return Err(crate::session::SessionError::new(code, msg).into());
+        }
+    }
+    Ok(resp)
+}
+
+/// Group poll detail (`getPollDetail`, command 12081): `GET {group_poll}/api/poll/detail` with
+/// AES params `{poll_id, imei}` (Zalo PC bundle, re-notes/74). Returns the `data` object.
+pub async fn poll_detail(s: &Session, poll_id: u64) -> Result<Value> {
+    poll_request(s, "/api/poll/detail", json!({"poll_id": poll_id, "imei": s.imei})).await
+}
+
+/// Vote in a group poll (`vote`, command 12084): `GET {group_poll}/api/poll/vote` with
+/// `{poll_id, option_ids, imei}`; the chosen options replace the previous choice.
+pub async fn poll_vote(s: &Session, poll_id: u64, option_ids: &[u64]) -> Result<Value> {
+    poll_request(s, "/api/poll/vote", json!({"poll_id": poll_id, "option_ids": option_ids, "imei": s.imei})).await
+}
+
+async fn poll_request(s: &Session, path: &str, body: Value) -> Result<Value> {
+    if s.login.is_none() {
+        anyhow::bail!("chưa đăng nhập");
+    }
+    let params = s.encoded_params(&body)?;
+    let resp = s
+        .get_endpoint("group_poll", &format!("{path}?{}&params={params}", s.common_params()))
+        .await?;
+    let resp = s.maybe_decrypt(resp, s.session_key_bytes()).await;
+    if let Some(code) = resp.get("error_code").and_then(Value::as_i64) {
+        if code != 0 {
+            let msg = resp.get("error_message").and_then(Value::as_str).unwrap_or("unknown");
+            return Err(crate::session::SessionError::new(code, msg).into());
+        }
+    }
+    Ok(resp.get("data").cloned().unwrap_or(resp))
+}
+
+/// The poll a `vote` notice refers to: Zalo PC reads `JSON.parse(message.params).pollId`.
+pub(crate) fn notice_poll_id(content: &Value) -> Option<u64> {
+    let parsed = match content {
+        Value::String(_) => json_field(Some(content))?,
+        other => other.clone(),
+    };
+    let object = parsed.as_object()?;
+    if object.get("action").and_then(Value::as_str) != Some("vote") {
+        return None;
+    }
+    let params = json_field(object.get("params"))?;
+    let id = params.get("pollId").or_else(|| params.get("poll_id"))?;
+    id.as_u64().or_else(|| id.as_str()?.trim().parse().ok()).filter(|id| *id > 0)
+}
+
+/// A tagged member in a group message: `pos`/`len` count UTF-16 units of the text and cover the
+/// whole `@Name` tag; `uid` is the member's user ID, or `"-1"` for everyone (re-notes/73).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Mention {
+    pub uid: String,
+    pub pos: u32,
+    pub len: u32,
+}
+
+/// Zalo PC's `MENTION_ALL_ID`.
+pub const MENTION_ALL_UID: &str = "-1";
+
+/// The `mentionInfo` JSON Zalo PC sends with `sendMentionMessage`: `[{pos,uid,len,type}]`, where
+/// `type` is 1 for everyone and 0 for one member. Tags outside the text, overlapping tags and
+/// empty IDs are dropped; `None` when nothing valid is left.
+pub(crate) fn mention_info(text: &str, mentions: &[Mention]) -> Option<String> {
+    let length = text.encode_utf16().count() as u64;
+    let mut valid: Vec<&Mention> = mentions
+        .iter()
+        .filter(|m| {
+            let uid = m.uid.trim();
+            m.len > 0
+                && u64::from(m.pos) + u64::from(m.len) <= length
+                && (uid == MENTION_ALL_UID || (!uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit())))
+        })
+        .collect();
+    valid.sort_by_key(|m| m.pos);
+    let mut end = 0u32;
+    valid.retain(|m| {
+        let keep = m.pos >= end;
+        if keep {
+            end = m.pos + m.len;
+        }
+        keep
+    });
+    if valid.is_empty() {
+        return None;
+    }
+    let items: Vec<Value> = valid
+        .iter()
+        .map(|m| {
+            let uid = m.uid.trim();
+            json!({"pos": m.pos, "uid": uid, "len": m.len, "type": if uid == MENTION_ALL_UID { 1 } else { 0 }})
+        })
+        .collect();
+    serde_json::to_string(&items).ok()
+}
+
+/// Group text that tags members (`sendMentionMessage`, command 11198, `/api/group/mention`), so the
+/// tagged people are notified. Body taken from Zalo PC's bundle: `grid, message, clientId,
+/// mentionInfo, language, visibility`, plus the `imei` every group send carries.
+pub(crate) async fn send_group_mention_with_client_id(
+    s: &Session,
+    grid: &str,
+    text: &str,
+    mention_info: &str,
+    now: u64,
+) -> Result<Value> {
+    if s.login.is_none() {
+        anyhow::bail!("chưa đăng nhập");
+    }
+    let clean_grid = grid
+        .trim_start_matches("group_")
+        .trim_start_matches('g')
+        .trim_start_matches('G');
+    let body = obj(&[
+        ("grid", json!(clean_grid)),
+        ("message", json!(text)),
+        ("clientId", json!(now)),
+        ("mentionInfo", json!(mention_info)),
+        ("language", json!("vi")),
+        ("visibility", json!(0)),
+        ("imei", json!(s.imei)),
+    ]);
+    let params = s.encoded_params(&body)?;
+    let url = format!(
+        "{}/api/group/mention?{}",
+        s.domains.group,
+        s.common_params()
+    );
+    let resp = s.post_form(&url, format!("params={params}")).await?;
     let resp = s.maybe_decrypt(resp, s.session_key_bytes()).await;
     if let Some(code) = resp.get("error_code").and_then(Value::as_i64) {
         if code != 0 {
@@ -3640,6 +3837,45 @@ pub(crate) async fn forward_message_with_client_id(
     } else {
         send_message_with_client_id(s, target_id, &msg.text, now).await
     }
+}
+
+/// Zalo's text emoticon codes (`/-strong` is what the quick "like" button sends). Codes come from
+/// the Zalo PC bundle; only those whose picture is unambiguous are mapped.
+const EMOTICON_CODES: &[(&str, &str)] = &[
+    ("/-strong", "👍"), ("/-weak", "👎"), ("/-heart", "❤️"), ("/-break", "💔"), ("/-ok", "👌"),
+    ("/-v", "✌️"), ("/-rose", "🌹"), ("/-cake", "🎂"), ("/-coffee", "☕"), ("/-beer", "🍺"),
+    ("/-flag", "🚩"), ("/-punch", "👊"), ("/-shit", "💩"), ("/-thanks", "🙏"),
+];
+/// Quick-emoji codes that Zalo PC sends as a whole message (`smile`, `surprised`, `cry`, `rage`).
+const QUICK_EMOJI_CODES: &[(&str, &str)] = &[(":>", "😆"), (":o", "😮"), (":-((", "😢"), (":-h", "😠")];
+
+/// Shows Zalo emoticon codes as emoji. `/-name` codes are replaced wherever they stand as a word;
+/// the short face codes only when they are the whole message, so ordinary text is never touched.
+pub fn display_emoticons(text: &str) -> std::borrow::Cow<'_, str> {
+    let trimmed = text.trim();
+    if let Some((_, emoji)) = QUICK_EMOJI_CODES.iter().find(|(code, _)| *code == trimmed) {
+        return std::borrow::Cow::Owned((*emoji).to_owned());
+    }
+    if !text.contains("/-") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("/-") {
+        let (before, tail) = rest.split_at(start);
+        out.push_str(before);
+        let boundary_before = out.chars().last().is_none_or(|c| !c.is_alphanumeric());
+        let word_len = tail[2..].find(|c: char| !c.is_ascii_alphabetic()).map_or(tail.len(), |n| n + 2);
+        let word = &tail[..word_len];
+        let lower = word.to_ascii_lowercase();
+        match EMOTICON_CODES.iter().find(|(code, _)| *code == lower).filter(|_| boundary_before) {
+            Some((_, emoji)) => out.push_str(emoji),
+            None => out.push_str(word),
+        }
+        rest = &tail[word_len..];
+    }
+    out.push_str(rest);
+    std::borrow::Cow::Owned(out)
 }
 
 /// Convert Zalo reaction icon code to visual emoji.
@@ -5645,7 +5881,11 @@ fn parse_chat_message(it: &Value) -> Option<ChatMessage> {
             link_url = None;
             link_thumb = None;
             link_src = None;
-            card = Some(serde_json::json!({"kind":"notice"}));
+            // Poll notices keep the poll, so the transcript can show it with its options.
+            card = Some(match raw_content_val.and_then(notice_poll_id) {
+                Some(poll_id) => serde_json::json!({"kind":"notice","poll_id":poll_id}),
+                None => serde_json::json!({"kind":"notice"}),
+            });
         }
         Some(RichCard::Text(text)) if link_url.is_none() => {
             content = text;
@@ -5690,6 +5930,7 @@ fn parse_chat_message(it: &Value) -> Option<ChatMessage> {
         link_desc,
         link_thumb,
         link_src,
+        photo_layout: raw_content_val.and_then(photo_layout),
 
         ..Default::default()
     })
@@ -6022,7 +6263,10 @@ fn merge_preview_batch(threads: &mut Vec<Thread>, resp: &Value, live: bool) -> V
                         existing.link_url = None;
                         existing.link_thumb = None;
                     }
-                    if existing.sticker_id.is_none() && parsed.sticker_id.is_some() {
+                    if existing.photo_layout.is_none() && parsed.photo_layout.is_some() {
+                existing.photo_layout = parsed.photo_layout.clone();
+            }
+            if existing.sticker_id.is_none() && parsed.sticker_id.is_some() {
                         existing.sticker_id = parsed.sticker_id;
                         existing.sticker_cate_id = parsed.sticker_cate_id;
                         existing.sticker_type = parsed.sticker_type;
@@ -7374,6 +7618,58 @@ pub async fn delete_conversation(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn emoticon_codes_show_as_emoji_without_touching_text() {
+        assert_eq!(display_emoticons("/-strong"), "👍");
+        assert_eq!(display_emoticons("ok /-heart/-strong nhé"), "ok ❤️👍 nhé");
+        assert_eq!(display_emoticons("/-STRONG"), "👍");
+        assert_eq!(display_emoticons(":>"), "😆");
+        assert_eq!(display_emoticons("giá :> 20k"), "giá :> 20k");
+        assert_eq!(display_emoticons("a/-strong"), "a/-strong");
+        assert_eq!(display_emoticons("/-unknown đường/-dẫn"), "/-unknown đường/-dẫn");
+    }
+
+    #[test]
+    fn vote_notices_keep_their_poll_id() {
+        let notice = json!({"action": "vote", "params": "{\"pollId\":4021,\"question\":\"Q\",\"msg\":{\"vi\":\"%1$s tham gia cuộc bình chọn: %2$s\"},\"dName\":\"A\"}"});
+        assert_eq!(notice_poll_id(&notice), Some(4021));
+        assert_eq!(notice_poll_id(&json!({"action": "msginfo.actionlist", "params": "{\"pollId\":1}"})), None);
+        assert_eq!(notice_poll_id(&json!("plain text")), None);
+    }
+
+    #[test]
+    fn mention_info_matches_zalo_pc_shape_and_counts_utf16() {
+        // "Chào " is 5 UTF-16 units; "@Hà Mây" is 7.
+        let text = "Chào @Hà Mây và @All";
+        let mentions = [
+            Mention { uid: "123456".into(), pos: 5, len: 7 },
+            Mention { uid: MENTION_ALL_UID.into(), pos: 16, len: 4 },
+            Mention { uid: "999".into(), pos: 6, len: 2 },   // overlaps the first tag
+            Mention { uid: "abc".into(), pos: 0, len: 1 },   // not a user ID
+            Mention { uid: "777".into(), pos: 19, len: 9 },  // runs past the text
+        ];
+        let info: Value = serde_json::from_str(&mention_info(text, &mentions).expect("info")).unwrap();
+        assert_eq!(info, json!([
+            {"pos": 5, "uid": "123456", "len": 7, "type": 0},
+            {"pos": 16, "uid": "-1", "len": 4, "type": 1}
+        ]));
+        assert!(mention_info("xin chào", &[]).is_none());
+    }
+
+    #[test]
+    fn photo_layout_reads_batch_placement_from_string_params() {
+        let content = json!({
+            "href": "https://photo.example.invalid/a.jpg",
+            "params": "{\"width\":3024,\"height\":4032,\"group_layout_id\":1785734810655,\"id_in_group\":7,\"total_item_in_group\":10,\"is_group_layout\":1}"
+        });
+        let layout = photo_layout(&content).expect("layout");
+        assert_eq!(layout.group_id, "1785734810655");
+        assert_eq!((layout.index, layout.total, layout.width, layout.height), (7, Some(10), Some(3024), Some(4032)));
+        let single = json!({"href": "https://photo.example.invalid/a.jpg", "params": "{\"width\":10}"});
+        assert!(photo_layout(&single).is_none());
+        assert!(photo_layout(&json!("[Hình ảnh]")).is_none());
+    }
+
     use super::*;
 
     #[test]

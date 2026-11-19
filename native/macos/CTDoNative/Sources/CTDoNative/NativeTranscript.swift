@@ -476,7 +476,7 @@ extension EnvironmentValues {
         }
 
         static func same(_ a: TranscriptRow, _ b: TranscriptRow) -> Bool {
-            a.message == b.message && a.showsTimestamp == b.showsTimestamp && a.startsRun == b.startsRun && a.endsRun == b.endsRun
+            a.message == b.message && a.showsTimestamp == b.showsTimestamp && a.startsRun == b.startsRun && a.endsRun == b.endsRun && a.album == b.album
         }
 
         func anchor() -> TranscriptAnchor? {

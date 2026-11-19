@@ -17,7 +17,7 @@ enum AnimatedImageCache {
         if let task = loading[url] { return await task.value }
         let task = Task.detached(priority: .utility) { () -> NSImage? in
             guard let (data, response) = try? await URLSession.shared.data(from: url),
-                  (response as? HTTPURLResponse)?.statusCode ?? 200 < 400, data.count < 4_000_000 else { return nil }
+                  (response as? HTTPURLResponse)?.statusCode ?? 200 < 400, data.count < 40_000_000 else { return nil }
             return NSImage(data: data)
         }
         loading[url] = task
