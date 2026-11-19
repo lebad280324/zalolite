@@ -19,6 +19,7 @@ use crate::session::{Session, SessionError, SessionStatus};
 use crate::store::{self, MessageStore};
 
 mod account_settings;
+mod account_watch;
 mod client_preferences;
 mod extras;
 mod features;
@@ -133,6 +134,9 @@ enum Command {
         #[serde(default)]
         is_group: bool,
         message_id: String,
+        /// A group admin removing the message for every member (`onlyMe: 0`, re-notes/76).
+        #[serde(default)]
+        for_everyone: bool,
     },
     /// Question, options and votes of a group poll (re-notes/74).
     PollDetail {
@@ -1821,19 +1825,27 @@ impl Core {
                 thread_id,
                 is_group,
                 message_id,
+                ..
             } => {
                 self.require_login()?;
                 let message = self.known_message(thread_id, *is_group, message_id)?;
                 let recall = matches!(command, Command::RecallMessage { .. });
+                let for_everyone = matches!(command, Command::DeleteMessage { for_everyone: true, .. });
                 if recall && !message.is_outgoing {
                     return Err(UserError("Chỉ thu hồi được tin nhắn do bạn gửi.").into());
+                }
+                if for_everyone && !*is_group {
+                    return Err(UserError("Chỉ quản trị viên nhóm mới xóa được tin cho cả nhóm.").into());
                 }
                 if !self.demo {
                     let response = if recall {
                         chat::recall_message(&self.session, thread_id, *is_group, &message).await?
                     } else {
-                        chat::delete_message_for_me(&self.session, thread_id, *is_group, &message)
-                            .await?
+                        chat::delete_message(&self.session, thread_id, *is_group, &message, !for_everyone)
+                            .await
+                            .map_err(|error| if for_everyone && SessionStatus::from_error(&error) != SessionStatus::Expired {
+                                anyhow!(UserError("Zalo không cho xóa tin này cho cả nhóm. Chỉ trưởng hoặc phó nhóm xóa được, và chỉ trong thời gian Zalo cho phép."))
+                            } else { error })?
                     };
                     check_response(&response)?;
                     let message = message.clone();
@@ -2409,6 +2421,14 @@ pub async fn run_stdio(demo: bool) -> Result<()> {
     let mut live_unsaved = false;
     let mut save_timer = tokio::time::interval(Duration::from_secs(2));
     save_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Other accounts' unread counts (re-notes/77): first check shortly after start, then every few minutes.
+    let mut watch_timer = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(30),
+        Duration::from_secs(account_watch::INTERVAL_SECS),
+    );
+    watch_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let (watch_tx, mut watch_rx) = mpsc::channel::<Value>(8);
+    let mut watch_task: Option<tokio::task::JoinHandle<()>> = None;
     loop {
         core.update_history_context(history_generation);
         tokio::select! {
@@ -2614,6 +2634,24 @@ pub async fn run_stdio(demo: bool) -> Result<()> {
                     }
                 }
             }
+            watched = watch_rx.recv() => {
+                let Some(watched) = watched else { continue; };
+                if watched.get("done").is_some() { watch_task = None; continue; }
+                emit(&core.output, event("account_unread", watched)).await?;
+            }
+            _ = watch_timer.tick(), if core.logged_in() && !demo && watch_task.is_none() => {
+                let active = core.own_uid();
+                let accounts = account_watch::other_accounts(Path::new("."), &active);
+                if !accounts.is_empty() {
+                    let sender = watch_tx.clone();
+                    watch_task = Some(tokio::spawn(async move {
+                        for uin in accounts {
+                            if sender.send(account_watch::check(uin).await).await.is_err() { return; }
+                        }
+                        let _ = sender.send(json!({"done": true})).await;
+                    }));
+                }
+            }
             polled = poll_rx.recv(), if poll_task.is_some() => {
                 let Some(polled) = polled else { continue; };
                 if polled.generation != generation { continue; }
@@ -2672,6 +2710,9 @@ pub async fn run_stdio(demo: bool) -> Result<()> {
         task.abort();
     }
     if let Some(task) = poll_task {
+        task.abort();
+    }
+    if let Some(task) = watch_task {
         task.abort();
     }
     drop(websocket);

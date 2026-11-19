@@ -222,6 +222,32 @@ extension AppStore {
         return rows
     }
 
+    /// Group owners and deputies may delete other members' messages for everyone, as in Zalo.
+    func canDeleteForEveryone(_ message: MessageSnapshot, in thread: ThreadSnapshot) -> Bool {
+        guard thread.isGroup, !message.isOutgoing, message.messageType != "chat.system", supports("delete_message") else { return false }
+        return (features.members[thread.id] ?? []).contains { $0.id == session.uin && $0.number("role") > 0 }
+    }
+
+    func deleteForEveryone(_ message: MessageSnapshot) {
+        guard let thread = selectedThread, canDeleteForEveryone(message, in: thread) else { return }
+        threadCommand("delete_message", thread: thread, parameters: ["message_id": .string(message.id), "for_everyone": .bool(true)])
+    }
+
+    /// The group member a clicked @tag names, matched on their Zalo name or the alias you gave them.
+    /// Tags carry no ID in stored history, so the open group's member list is the reference; it is
+    /// requested when missing and the click does nothing until it arrives.
+    func mentionedMember(_ name: String) -> FeatureRow? {
+        let wanted = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !wanted.isEmpty, wanted.caseInsensitiveCompare("All") != .orderedSame, let thread = selectedThread, thread.isGroup else { return nil }
+        guard let members = features.members[thread.id] else {
+            if supports("get_group_members") { threadCommand("get_group_members", thread: thread) }
+            return nil
+        }
+        func same(_ value: String) -> Bool { !value.isEmpty && value.compare(wanted, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+        return members.first { same($0.string("name", "display_name")) || same(aliases[$0.id] ?? "") }
+            ?? members.first { $0.string("name", "display_name").localizedStandardContains(wanted) }
+    }
+
     /// Replaces the typed `@…` with the chosen name and remembers who it tags, so sending notifies them.
     func insertMention(uid: String, name: String, thread: ThreadSnapshot) {
         draft = ComposerAssistText.insertingMention(name, into: draft)

@@ -9,6 +9,8 @@ struct InspectorLibrary: View {
     @State private var tab: String
     init(thread: ThreadSnapshot, initialTab: String = "photos") { self.thread=thread; _tab=State(initialValue:initialTab) }
     @State private var expanded = false
+    /// The member whose profile card is open from the member list.
+    @State private var profileMemberID: String?
     private let grid = [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)]
 
     private var photos: [MessageSnapshot] { store.selectedMessages.filter { $0.imageURL != nil && $0.fileURL == nil }.reversed() }
@@ -94,6 +96,9 @@ struct InspectorLibrary: View {
                 ForEach(limited(members, 8)) { row in
                     HStack(spacing: 9) {
                         let role = Int(row.number("role"))
+                        // Avatar and name open the member's profile card, like a tag or avatar in the chat.
+                        Button { profileMemberID = row.id } label: {
+                        HStack(spacing: 9) {
                         AvatarView(name: row.string("name", "display_name"), url: row.string("avatar"), size: 26)
                             .overlay(alignment: .bottomTrailing) {
                                 if role > 0 {
@@ -111,6 +116,15 @@ struct InspectorLibrary: View {
                                 Text(role == 2 ? "Trưởng nhóm" : "Phó nhóm").font(.system(size: 10.5, weight: .medium))
                                     .foregroundStyle(role == 2 ? Color.orange : .secondary)
                             }
+                        }
+                        }
+                        .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Xem thông tin \(row.string("name", "display_name"))")
+                        .windowBoundedPopover(isPresented: Binding(get: { profileMemberID == row.id }, set: { if !$0 { profileMemberID = nil } })) {
+                            ContactProfilePopover(userID: row.id, name: row.string("name", "display_name"),
+                                                  avatar: row.string("avatar").isEmpty ? nil : row.string("avatar")) { profileMemberID = nil }
                         }
                         Spacer()
                         if row.id != store.session.uin {

@@ -5,6 +5,8 @@ import NativeBridge
 struct ConversationView: View {
     @EnvironmentObject private var store: AppStore
     let thread: ThreadSnapshot
+    /// Replaces the centred title, e.g. the chat bubble's own header with its window buttons.
+    var customHeader: AnyView? = nil
     @State private var confirmRecall: MessageSnapshot?
     @State private var showingSchedule = false
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
@@ -23,7 +25,8 @@ struct ConversationView: View {
     /// Read only when a menu opens; a plain box keeps window resizes from re-evaluating this view every frame.
     @State private var columnFrame = FrameBox()
     @StateObject private var menuMonitor = MessageMenuMonitor()
-    @StateObject private var quickReactions = QuickReactionMonitor()
+    /// The window this conversation is drawn in; event monitors act only on events from it.
+    @State private var hostWindow = WindowBox()
     /// Position in `store.conversationSearchHits` (0 = newest match).
     @State private var searchIndex = 0
     private var hasDraft: Bool {
@@ -66,10 +69,14 @@ struct ConversationView: View {
             transcript(topInset: top, bottomInset: bottom)
         } header: {
             VStack(spacing: 0) {
-                GeometryReader { proxy in
-                    ConversationHeader(thread: thread, availableWidth: max(160, proxy.size.width - 28))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity).id(thread.id)
-                }.frame(height: 76)
+                if let customHeader {
+                    customHeader
+                } else {
+                    GeometryReader { proxy in
+                        ConversationHeader(thread: thread, availableWidth: max(160, proxy.size.width - 28))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity).id(thread.id)
+                    }.frame(height: 76)
+                }
                 conversationControls
                 StrangerBanner(thread: thread)
                 PinnedMessagesBar(thread: thread)
@@ -89,14 +96,14 @@ struct ConversationView: View {
         .onValueChange(of:mediaOnly){_,value in store.transcript.configure(query:store.conversationSearch,media:value,threadID:thread.id)}
         .toolbarBackground(.hidden, for:.windowToolbar)
         .onAppear {
-            swipe.install(hovered: { store.selectingMessages == false ? TranscriptPointer.messageID() : nil },
+            swipe.install(hovered: { [hostWindow] in store.selectingMessages == false && hostWindow.owns(NSApp.currentEvent) ? TranscriptPointer.messageID() : nil },
                           onReply: { id in if let message = store.selectedMessages.first(where: { $0.id == id }), store.supports("send_quote") { store.quote = message } })
         }
         .onAppear {
-            menuMonitor.install(hovered: { store.selectingMessages ? nil : TranscriptPointer.messageID() }) { id, location in
+            menuMonitor.install(hovered: { [hostWindow] in store.selectingMessages || !hostWindow.owns(NSApp.currentEvent) ? nil : TranscriptPointer.messageID() }) { [hostWindow] id, location in
                 guard let message = store.selectedMessages.first(where: { $0.id == id }) else { return }
                 // AppKit reports window points from the bottom; SwiftUI frames are measured from the top.
-                let height = NSApp.keyWindow?.contentView?.bounds.height ?? 0
+                let height = (hostWindow.window ?? NSApp.keyWindow)?.contentView?.bounds.height ?? 0
                 let point = CGPoint(x: location.x - columnFrame.value.minX, y: height - location.y - columnFrame.value.minY)
                 menuTarget = MessageMenuTarget(message: message, point: point)
             }
@@ -115,13 +122,8 @@ struct ConversationView: View {
                 store.threadCommand("get_group_members", thread: thread)
             }
         }
-        .onAppear {
-            quickReactions.install(column: { columnFrame.value }, enabled: {
-                menuTarget == nil && !store.selectingMessages && store.supports("react") && NSApp.isActive
-            })
-        }
-        .onValueChange(of: menuTarget?.message.id) { _, _ in quickReactions.hide() }
-        .onDisappear { swipe.remove(); menuMonitor.remove(); quickReactions.remove() }
+        .onDisappear { swipe.remove(); menuMonitor.remove() }
+        .background(WindowReader(box: hostWindow))
         .background { GeometryReader { proxy in Color.clear.onAppear { columnFrame.value = proxy.frame(in: .global) }
             .onValueChange(of: proxy.frame(in: .global)) { _, frame in columnFrame.value = frame } } }
         .overlay(alignment: .topLeading) {
@@ -137,22 +139,6 @@ struct ConversationView: View {
                             .transition(.scale(scale: 0.92, anchor: .topLeading).combined(with: .opacity))
                     }
                 }
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if let quick = quickReactions.target, menuTarget == nil,
-               let message = store.selectedMessages.first(where: { $0.id == quick.id }) {
-                let mine = ReactionChips.details(message).first { $0.reactors.contains(store.session.uin) || $0.reactors.contains("0") }?.emoji
-                QuickReactionBar(mine: mine) { emoji in
-                    // Choosing your current reaction again removes it, as in Zalo.
-                    store.messageAction("react", message: message, reaction: emoji == mine ? "" : emoji)
-                    quickReactions.hide()
-                }
-                .fixedSize()
-                .frame(width: 240, height: 40, alignment: quick.outgoing ? .bottomTrailing : .bottomLeading)
-                .offset(x: quick.outgoing ? quick.anchorX - 246 : quick.anchorX + 6, y: quick.bottom - 38)
-                .transition(.opacity)
-                .id(quick.id)
             }
         }
         .animation(reducedMotion ? nil : .snappy(duration: 0.16), value: menuTarget?.message.id)
@@ -179,6 +165,13 @@ struct ConversationView: View {
         }
         .sheet(isPresented: $showingContactCard) { ContactCardPicker(thread: thread) }
         .popover(isPresented: $showingFormatting) { FormattingPanel() }
+        .confirmationDialog("Xóa tin nhắn này cho cả nhóm?", isPresented: Binding(get: { store.deleteForEveryoneCandidate != nil }, set: { if !$0 { store.deleteForEveryoneCandidate = nil } }), titleVisibility: .visible) {
+            Button("Xóa cho cả nhóm", role: .destructive) {
+                if let message = store.deleteForEveryoneCandidate { store.deleteForEveryone(message) }
+                store.deleteForEveryoneCandidate = nil
+            }
+            Button("Hủy", role: .cancel) { store.deleteForEveryoneCandidate = nil }
+        } message: { Text("Tin nhắn sẽ bị xóa với mọi thành viên. Chỉ trưởng hoặc phó nhóm làm được, trong thời gian Zalo cho phép.") }
         .confirmationDialog("Thu hồi tin nhắn này?", isPresented: Binding(get: { confirmRecall != nil }, set: { if !$0 { confirmRecall = nil } }), titleVisibility: .visible) {
             Button("Thu hồi", role: .destructive) {
                 if let message = confirmRecall { store.messageAction("recall_message", message: message) }
@@ -229,9 +222,13 @@ struct ConversationView: View {
             reply:{message in if UserDefaults.standard.bool(forKey:"nativeDoubleClickReply"),store.supports("send_quote"){store.quote=message}},
             quoteJump:{store.jump(toThread:thread.id,messageID:$0)},
             profile:{input,view,rect in
-                // Open above or below the avatar, whichever has room, so the card stays inside the window.
-                let inWindow=view.convert(rect,to:nil),windowHeight=view.window?.contentView?.bounds.height ?? 800
-                let above=windowHeight-inWindow.maxY-PopoverRoom.margin*2,below=inWindow.minY-PopoverRoom.margin*2
+                // Open above or below the avatar, whichever has more screen room, so the card stays on screen.
+                let inWindow=view.convert(rect,to:nil)
+                var above=(view.window?.contentView?.bounds.height ?? 800)-inWindow.maxY-PopoverRoom.margin*2,below=inWindow.minY-PopoverRoom.margin*2
+                if let window=view.window,let screen=window.screen {
+                    let onScreen=window.convertToScreen(inWindow),visible=screen.visibleFrame
+                    above=visible.maxY-onScreen.maxY-PopoverRoom.margin*2;below=onScreen.minY-visible.minY-PopoverRoom.margin*2
+                }
                 let up=above>below,room=max(200,up ? above : below)
                 let edge:NSRectEdge=view.isFlipped ? (up ? .minY : .maxY) : (up ? .maxY : .minY)
                 let popover=NSPopover();popover.behavior = .transient
@@ -460,7 +457,7 @@ struct ConversationView: View {
             }
         }
         if message.imageURL != nil || message.fileURL != nil { Button("Lưu về máy…",systemImage:"arrow.down") {store.downloadMedia(message)} }
-        if message.imageURL != nil { Button("Sao chép ảnh…",systemImage:"photo") {store.downloadMedia(message,copyImage:true)} }
+        if message.imageURL != nil { Button("Sao chép ảnh",systemImage:"photo") {store.copyPhoto(message)} }
         Divider()
         if store.supports("send_quote") {
             Button("Trả lời", systemImage: "arrowshape.turn.up.left") { store.quote = message }
@@ -487,6 +484,9 @@ struct ConversationView: View {
         }
         if store.supports("delete_message") {
             Button("Xóa ở phía tôi", systemImage: "trash", role: .destructive) { store.messageAction("delete_message", message: message) }
+            if store.canDeleteForEveryone(message, in: thread) {
+                Button("Xóa cho cả nhóm…", systemImage: "trash.slash", role: .destructive) { store.deleteForEveryoneCandidate = message }
+            }
         }
     }
 
@@ -495,6 +495,27 @@ struct ConversationView: View {
 
 
 final class FrameBox { var value: CGRect = .zero }
+
+/// The window a view is in, kept without re-rendering.
+final class WindowBox {
+    weak var window: NSWindow?
+    /// An event with no window (or one from this window) belongs to this view.
+    func owns(_ event: NSEvent?) -> Bool { event?.window == nil || window == nil || event?.window === window }
+}
+
+/// Fills a `WindowBox` once the view is placed in a window.
+struct WindowReader: NSViewRepresentable {
+    let box: WindowBox
+    func makeNSView(context: Context) -> NSView { Reader(box: box) }
+    func updateNSView(_ view: NSView, context: Context) {}
+    private final class Reader: NSView {
+        let box: WindowBox
+        init(box: WindowBox) { self.box = box; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); box.window = window }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
 final class IdentityCache { var values:[String:(name:String,avatar:String?,id:String)] = [:] }
 
 /// Grouped card used by the details panel.
@@ -528,6 +549,9 @@ struct MessageRow: View, Equatable {
     var album: [MessageSnapshot] = []
     var onQuoteJump: (String) -> Void
     @State private var showingProfile = false
+    @EnvironmentObject private var store: AppStore
+    /// The member opened by clicking an @tag in this message.
+    @State private var mentioned: FeatureRow?
     static func ==(lhs: Self, rhs: Self) -> Bool {
         lhs.message == rhs.message && lhs.showSender == rhs.showSender && lhs.showAvatar == rhs.showAvatar &&
         lhs.reserveAvatar == rhs.reserveAvatar && lhs.highlighted == rhs.highlighted && lhs.showThumbnails == rhs.showThumbnails &&
@@ -667,7 +691,19 @@ struct MessageRow: View, Equatable {
                         HStack(alignment:.lastTextBaseline,spacing:7) {
                             Text(MessageTypography.withMentions(caption, outgoing: message.isOutgoing))
                                 .font(.system(size:MessageTextSize.size(14))).foregroundStyle(primary).textSelection(.enabled)
+                                .tint(message.isOutgoing ? primary : .accentColor)
                                 .lineSpacing(1.5).fixedSize(horizontal:false,vertical:true)
+                                .environment(\.openURL, OpenURLAction { url in
+                                    guard url.scheme == MessageTypography.mentionScheme else { return .systemAction }
+                                    mentioned = store.mentionedMember(url.path)
+                                    return .handled
+                                })
+                                .windowBoundedPopover(isPresented: Binding(get: { mentioned != nil }, set: { if !$0 { mentioned = nil } })) {
+                                    if let member = mentioned {
+                                        ContactProfilePopover(userID: member.id, name: member.string("name", "display_name"),
+                                                              avatar: member.string("avatar").isEmpty ? nil : member.string("avatar")) { mentioned = nil }
+                                    }
+                                }
                             timeLabel.foregroundStyle(secondary).fixedSize()
                         }
                     }

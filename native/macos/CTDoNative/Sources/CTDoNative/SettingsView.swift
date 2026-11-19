@@ -16,7 +16,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   case .general: return ["Ngôn ngữ", "Mở khi đăng nhập macOS", "Ghi nhớ tài khoản", "Kết nối lại", "Chạy nền",
                          "Bong bóng chat", "Bong bóng trò chuyện nổi", "Chat head", "Biểu tượng thanh menu", "Ẩn biểu tượng Dock"]
   case .updates: return ["Phiên bản", "Kiểm tra cập nhật", "Tự động kiểm tra", "Bản mới"]
-  case .security: return ["Khóa ứng dụng", "Hình nền màn hình khóa", "Phím tắt khóa", "Bảo mật hai lớp", "Đăng xuất", "Mã PIN hội thoại ẩn"]
+  case .security: return ["Khóa ứng dụng", "Hình nền màn hình khóa", "Phím tắt khóa", "Bảo mật hai lớp", "Đăng xuất", "Mã PIN hội thoại ẩn", "Thanh tài khoản", "Tab tài khoản", "Chuyển tài khoản"]
   case .privacy: return ["Ngày sinh", "Trạng thái truy cập", "Trạng thái đã xem", "Người được nhắn tin", "Người được gọi", "Danh sách chặn", "Tìm qua số điện thoại", "Nguồn kết bạn", "Đang soạn"]
   case .sync: return ["Đồng bộ từ điện thoại", "Xuất bản sao", "Nhập lịch sử", "Sao lưu"]
   case .storage: return ["Dung lượng", "Bộ nhớ đệm", "Dọn dữ liệu", "Ổ đĩa", "Thư mục dữ liệu", "Hủy tải"]
@@ -166,7 +166,9 @@ struct SettingsView: View {
    .frame(maxWidth: .infinity)
   }
   .navigationTitle(page.rawValue)
-  .frame(minWidth: 900, idealWidth: 940, minHeight: 620, idealHeight: 680)
+  // Resizable: the window keeps only a minimum, the panes grow with it.
+  .frame(minWidth: 760, idealWidth: 940, maxWidth: .infinity, minHeight: 520, idealHeight: 680, maxHeight: .infinity)
+  .background(ResizableWindow())
   .task { system.refresh(); applyRequestedPage(); refreshPage() }.onValueChange(of: page) { _, _ in refreshPage() }
   .onValueChange(of: store.requestedSettingsPage) { _, _ in applyRequestedPage() }
   .alert("Thay đổi \(pendingLabel)?", isPresented: Binding(get: { pendingKey != nil }, set: { if !$0 { pendingKey = nil } })) {
@@ -186,8 +188,8 @@ struct SettingsView: View {
     Toggle("Tiếp tục chạy nền khi đóng cửa sổ", isOn: $keepRunning)
     Toggle("Hiện biểu tượng trên thanh menu", isOn: $menuBarIcon)
     Toggle("Ẩn biểu tượng Dock khi đã đóng cửa sổ", isOn: $hideDock).disabled(!keepRunning || !menuBarIcon)
-    Toggle("Bong bóng chat khi có tin nhắn mới", isOn: $chatHeads)
-    Text("Khi chạy nền, Zalolite vẫn giữ kết nối để nhận tin nhắn, cuộc gọi đến và đồng bộ với điện thoại; trạng thái truy cập hiển thị theo mục Quyền riêng tư. Bong bóng chat hiện ở mép màn hình khi bạn đang ở ứng dụng khác; bấm vào để trả lời ngay, kéo để đổi vị trí. Chọn Thoát Zalolite (⌘Q) để ngắt hẳn.").font(.caption).foregroundStyle(.secondary)
+    Toggle("Bong bóng chat Zalolite ở góc màn hình", isOn: $chatHeads)
+    Text("Khi chạy nền, Zalolite vẫn giữ kết nối để nhận tin nhắn, cuộc gọi đến và đồng bộ với điện thoại; trạng thái truy cập hiển thị theo mục Quyền riêng tư. Bong bóng chat: biểu tượng Zalolite luôn nằm ở mép màn hình; bấm để chọn người nhắn tin, tin mới khi bạn ở ứng dụng khác hiện thành bong bóng bên dưới. Kéo để đổi vị trí. Chọn Thoát Zalolite (⌘Q) để ngắt hẳn.").font(.caption).foregroundStyle(.secondary)
    }
    Section("Khởi động") { Toggle("Mở khi đăng nhập macOS", isOn: Binding(get: { system.launchAtLogin }, set: { system.setLaunchAtLogin($0) })); Text("macOS có thể yêu cầu cho phép trong Mục đăng nhập.").font(.caption).foregroundStyle(.secondary) }
    Section("Kết nối") { LabeledContent("Trạng thái", value: store.connection); Button("Kết nối lại bộ xử lý") { store.restart() } }
@@ -518,5 +520,19 @@ struct StorageOverview: View {
    Text(text(value)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
    action().frame(width: 22)
   }.padding(.vertical, 9)
+ }
+}
+
+
+/// SwiftUI's Settings window can come without a resize handle; this adds it once the view is in a window.
+private struct ResizableWindow: NSViewRepresentable {
+ func makeNSView(context: Context) -> NSView { Marker() }
+ func updateNSView(_ view: NSView, context: Context) {}
+ private final class Marker: NSView {
+  override func viewDidMoveToWindow() {
+   super.viewDidMoveToWindow()
+   window?.styleMask.insert(.resizable)
+  }
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
  }
 }

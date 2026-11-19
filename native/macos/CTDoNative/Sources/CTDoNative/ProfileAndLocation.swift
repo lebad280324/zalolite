@@ -287,7 +287,7 @@ struct ContactProfileCard: View {
                 }.padding(.horizontal, 10).padding(.vertical, 8)
             }
         }
-        .frame(width: 380, height: min(600, maxHeight))
+        .frame(width: 380, height: min(760, maxHeight))
         .onAppear { store.requestProfile(userID) }
     }
 

@@ -123,6 +123,12 @@ final class AppStore: ObservableObject {
     var pendingPreviews: [String: String] = [:]
     var pendingSaves: [String: String] = [:]
     @Published var fileDownloadsVersion = 0
+    /// The account being switched to, shown instead of the sign-in screen while the worker restarts.
+    @Published var switchingTo: SavedAccount?
+    /// Unread counts the core checked for the other saved accounts, by UIN.
+    @Published var liveAccountUnread: [String: AccountUnread] = [:]
+    /// A message a group admin chose to delete for every member, awaiting confirmation.
+    @Published var deleteForEveryoneCandidate: MessageSnapshot?
     /// Group polls loaded for notices on screen, by poll ID.
     @Published var polls: [UInt64: PollSnapshot] = [:]
     var pollRequested: [UInt64: Date] = [:]
@@ -567,6 +573,8 @@ final class AppStore: ObservableObject {
                 ready = true; connection = "Đang nạp dữ liệu…"; send("bootstrap")
             case "session":
                 let next = try event.data?.decode(SessionSnapshot.self) ?? SessionSnapshot()
+                // The worker answered for the account switched to: signed in, or asking for a QR code.
+                switchingTo = nil
                 if !next.loggedIn || next.uin != session.uin {
                     cancelTimeouts(); pending.removeAll(); busy.removeAll()
                     drafts.removeAll(); historyLimits.removeAll(); historyCursors.removeAll(); historyHasMore.removeAll(); historyHasNewer.removeAll(); removedMessageIDs.removeAll(); pageRequests.removeAll(); messageCacheOrder.removeAll(); lastHistoryRefresh.removeAll(); transcript.reset()
@@ -652,6 +660,16 @@ final class AppStore: ObservableObject {
                     let next = unique.values.sorted { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp }
                     cacheMessages(next, threadID: snapshot.threadID, older: snapshot.before != nil)
                     if snapshot.threadID == selectedThreadID { resolveJump(); markSelectedReadIfVisible() }
+                }
+            case "account_unread":
+                // Another saved account checked in the background (re-notes/77).
+                if let data = event.data, let uin = data["uin"]?.string {
+                    let checked = Date(timeIntervalSince1970: (data["checked_at"]?.number ?? Date().timeIntervalSince1970 * 1000) / 1000)
+                    if let count = data["count"]?.number {
+                        liveAccountUnread[uin] = AccountUnread(count: Int(count), asOf: checked, live: true)
+                    } else if data["error"]?.string == "expired" {
+                        liveAccountUnread[uin] = AccountUnread(count: 0, asOf: checked, live: true, expired: true)
+                    }
                 }
             case "typing":
                 if let thread = event.data?["thread_id"]?.string, let user = event.data?["user_id"]?.string, user != session.uin {

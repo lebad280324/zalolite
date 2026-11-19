@@ -346,52 +346,107 @@ struct VoiceCard: View {
 // MARK: - Video
 
 /// Video message: still frame with length and a play button; plays in a window-sized sheet.
+/// A video plays right in the conversation, like Messenger: a click starts it in place with
+/// inline controls; the expand button still opens the large player.
 struct VideoCard: View {
+    @EnvironmentObject private var store: AppStore
+    /// Learnt aspects outlive the card, so a re-measured row gets the right height at once.
+    @MainActor static var aspects: [URL: CGFloat] = [:]
     let url: URL
     let thumbnail: URL?
     let time: Date
     @State private var duration: Double?
-    @State private var playing = false
+    /// Width over height, from the video track; portrait clips (TikTok, Reels) stay portrait.
+    @State private var aspect: CGFloat?
+    private var knownAspect: CGFloat? { aspect ?? Self.aspects[url] }
+    @State private var player: AVPlayer?
+    @State private var expanded = false
     @State private var hovering = false
 
+    private var size: CGSize {
+        let width: CGFloat = 240
+        guard let aspect = knownAspect, aspect > 0 else { return CGSize(width: width, height: 260) }
+        return CGSize(width: width, height: min(380, max(140, width / aspect)))
+    }
+
     var body: some View {
-        Button { playing = true } label: {
-            ZStack {
-                Color.black.opacity(0.85)
-                if let thumbnail {
-                    AsyncImage(url: thumbnail) { $0.resizable().scaledToFill() } placeholder: { ProgressView().controlSize(.small).tint(.white) }
+        ZStack {
+            Color.black
+            if let player {
+                PlayerView(player: player, inline: true)
+            } else {
+                Button { start() } label: {
+                    ZStack {
+                        if let thumbnail {
+                            AsyncImage(url: thumbnail) { $0.resizable().scaledToFill() } placeholder: { ProgressView().controlSize(.small).tint(.white) }
+                        }
+                        Image(systemName: "play.fill").font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 54, height: 54).background(.ultraThinMaterial, in: Circle())
+                            .scaleEffect(hovering ? 1.08 : 1)
+                    }
+                    .frame(width: size.width, height: size.height).clipped()
+                    .contentShape(Rectangle())
                 }
-                Image(systemName: "play.fill").font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 54, height: 54).background(.ultraThinMaterial, in: Circle())
-                    .scaleEffect(hovering ? 1.08 : 1)
+                .buttonStyle(.plain)
+                .help("Phát video")
             }
-            .frame(width: 220, height: 260).clipped()
-            .overlay(alignment: .topLeading) {
-                if let duration {
-                    Text(format(duration)).font(.system(size: 11.5, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
-                        .padding(.horizontal, 7).padding(.vertical, 3).background(.black.opacity(0.45), in: Capsule()).padding(9)
+        }
+        .frame(width: size.width, height: size.height)
+        .overlay(alignment: .topLeading) {
+            if player == nil, let duration {
+                Text(format(duration)).font(.system(size: 11.5, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
+                    .padding(.horizontal, 7).padding(.vertical, 3).background(.black.opacity(0.45), in: Capsule()).padding(9)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if player != nil || hovering {
+                Button { player?.pause(); expanded = true } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 26, height: 26).background(.black.opacity(0.45), in: Circle())
                 }
+                .buttonStyle(.plain).padding(8).help("Mở cửa sổ lớn")
             }
-            .overlay(alignment: .bottomTrailing) {
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if player == nil {
                 Text(time, format: .dateTime.hour().minute()).font(.system(size: 10)).monospacedDigit().foregroundStyle(.white)
                     .padding(.horizontal, 7).padding(.vertical, 3).background(.black.opacity(0.4), in: Capsule()).padding(8)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onHover { hovering = $0 }
         .animation(.snappy(duration: 0.18), value: hovering)
-        .help("Phát video")
         .task(id: url) {
-            if let value = try? await AVURLAsset(url: url).load(.duration).seconds, value.isFinite, value > 0 { duration = value }
+            let asset = AVURLAsset(url: url)
+            if let value = try? await asset.load(.duration).seconds, value.isFinite, value > 0 { duration = value }
+            if let track = try? await asset.loadTracks(withMediaType: .video).first,
+               let natural = try? await track.load(.naturalSize), let transform = try? await track.load(.preferredTransform) {
+                let shown = natural.applying(transform)
+                if abs(shown.height) > 0 {
+                    let value = abs(shown.width) / abs(shown.height)
+                    let first = Self.aspects[url] == nil
+                    Self.aspects[url] = value
+                    aspect = value
+                    // The row was measured at the default height; measure it again once.
+                    if first { store.transcript.presentationVersion += 1 }
+                }
+            }
         }
-        .sheet(isPresented: $playing) { VideoSheet(url: url) { playing = false } }
+        // Scrolled away or the conversation changed: stop instead of playing unseen.
+        .onDisappear { player?.pause() }
+        .sheet(isPresented: $expanded) { VideoSheet(url: url) { expanded = false } }
         .contextMenu {
-            Button("Phát video") { playing = true }
+            Button(player == nil ? "Phát video" : "Tạm dừng") { if let player { player.pause() } else { start() } }
+            Button("Mở cửa sổ lớn") { player?.pause(); expanded = true }
             Button("Mở bằng ứng dụng khác") { NSWorkspace.shared.open(url) }
             Button("Sao chép liên kết") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string) }
         }
+    }
+
+    private func start() {
+        let player = AVPlayer(url: url)
+        self.player = player
+        player.play()
     }
 
     private func format(_ seconds: Double) -> String {
@@ -475,10 +530,13 @@ struct CallCard: View {
 /// (`_AVKit_SwiftUI` superclass metadata missing; crash reports 2026-11-12 13:53 and 14:06).
 private struct PlayerView: NSViewRepresentable {
     let player: AVPlayer?
+    /// Inside a message: compact controls under the picture, no full screen button.
+    var inline = false
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
-        view.controlsStyle = .floating
-        view.showsFullScreenToggleButton = true
+        view.controlsStyle = inline ? .inline : .floating
+        view.showsFullScreenToggleButton = !inline
+        view.videoGravity = .resizeAspect
         view.player = player
         return view
     }

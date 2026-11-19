@@ -574,7 +574,9 @@ fn known_thread<'a>(threads: &'a [Thread], id: &str, is_group: bool) -> Result<&
 }
 
 fn optional_text(params: &Value, key: &str, max_bytes: usize) -> Result<Option<String>> {
-    let Some(value) = params.get(key) else {
+    // Commands decoded from the native intents serialize an absent `Option` as `null`; that is
+    // "not given", not a wrong type (it made every "Gửi kết bạn" without a message fail).
+    let Some(value) = params.get(key).filter(|value| !value.is_null()) else {
         return Ok(None);
     };
     let value = value
@@ -912,6 +914,15 @@ fn stage_history_file(source: &Path, staging: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn optional_text_treats_null_as_absent() {
+        let params = json!({"user_id": "1", "message": null, "bad": 5});
+        assert_eq!(optional_text(&params, "message", 10).unwrap(), None);
+        assert_eq!(optional_text(&params, "missing", 10).unwrap(), None);
+        assert!(optional_text(&params, "bad", 10).is_err());
+        assert_eq!(optional_text(&json!({"message": "chào"}), "message", 10).unwrap().as_deref(), Some("chào"));
+    }
+
     use super::*;
 
     #[test]

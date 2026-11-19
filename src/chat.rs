@@ -4001,6 +4001,45 @@ pub async fn delete_message_for_me(
     is_group: bool,
     msg: &ChatMessage,
 ) -> Result<Value> {
+    delete_message(s, to_id, is_group, msg, true).await
+}
+
+/// The `msgs[]` item Zalo PC sends to delete a message (re-notes/76):
+/// `{cliMsgId: message.cliMsgId, globalMsgId: message.msgId, ownerId: sender UID ("0" = me), destId}`.
+/// The owner used to be the sender's display name and the client ID the message time, so
+/// deleting someone else's message in a group failed.
+pub(crate) fn delete_target(msg: &ChatMessage, to_id: &str, is_group: bool, my_uid: &str, now: u64) -> Result<Value> {
+    let owner = if msg.is_outgoing {
+        my_uid.to_owned()
+    } else if !is_group {
+        to_id.to_owned()
+    } else {
+        sidebar_sender_id(msg).ok_or_else(|| anyhow::anyhow!("không rõ người gửi tin nhắn"))?
+    };
+    let cli_id = msg
+        .client_message_id
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|id| *id > 0)
+        .unwrap_or(if msg.ts > 0 { msg.ts as u64 } else { now });
+    let dest = if is_group {
+        to_id.trim_start_matches("group_").trim_start_matches('g').trim_start_matches('G')
+    } else {
+        to_id
+    };
+    Ok(json!({"cliMsgId": cli_id.to_string(), "globalMsgId": msg.id, "ownerId": owner, "destId": dest}))
+}
+
+/// Delete a message for me (`only_me`) or, as a group admin, for everyone in the group: Zalo PC
+/// sends the same request with `onlyMe: 0` (`deleteGroupMessageV2(…, a)` → `onlyMe: 1 !== a ? 0 : a`).
+pub async fn delete_message(
+    s: &Session,
+    to_id: &str,
+    is_group: bool,
+    msg: &ChatMessage,
+    only_me: bool,
+) -> Result<Value> {
     if s.login.is_none() {
         anyhow::bail!("chưa đăng nhập");
     }
@@ -4013,25 +4052,7 @@ pub async fn delete_message_for_me(
         .as_ref()
         .map(|l| l.uin.clone())
         .unwrap_or_else(|| "0".into());
-    let owner_id = if msg.is_outgoing {
-        my_uid.as_str()
-    } else if !is_group {
-        to_id
-    } else {
-        &msg.sender
-    };
-    let cli_id = if msg.ts > 0 {
-        msg.ts.to_string()
-    } else {
-        now.to_string()
-    };
-
-    let msgs_arr = json!([{
-        "cliMsgId": cli_id,
-        "globalMsgId": msg.id,
-        "ownerId": owner_id,
-        "destId": to_id
-    }]);
+    let msgs_arr = json!([delete_target(msg, to_id, is_group, &my_uid, now)?]);
 
     if is_group {
         let clean_grid = to_id
@@ -4042,7 +4063,7 @@ pub async fn delete_message_for_me(
             ("grid", json!(clean_grid)),
             ("cliMsgId", json!(now)),
             ("msgs", msgs_arr),
-            ("onlyMe", json!(1)),
+            ("onlyMe", json!(if only_me { 1 } else { 0 })),
         ]);
         let params = s.encoded_params(&body)?;
         let url = format!(
@@ -4065,7 +4086,7 @@ pub async fn delete_message_for_me(
             ("toid", json!(to_id)),
             ("cliMsgId", json!(now)),
             ("msgs", msgs_arr),
-            ("onlyMe", json!(1)),
+            ("onlyMe", json!(if only_me { 1 } else { 0 })),
             ("imei", json!(s.imei)),
         ]);
         let params = s.encoded_params(&body)?;
@@ -7627,6 +7648,20 @@ pub async fn delete_conversation(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn delete_targets_use_sender_uid_and_client_id() {
+        let mut msg = ChatMessage { id: "8102".into(), sender: "Thu MKT".into(), ts: 1_795_000_000_000,
+            client_message_id: "1795000000123".into(), ..Default::default() };
+        msg.wire_ref = crate::message_model::WireMessageRef::from_raw(&json!({"uidFrom": "6120000000000000643"}));
+        let item = delete_target(&msg, "g555", true, "777", 9).unwrap();
+        assert_eq!(item, json!({"cliMsgId": "1795000000123", "globalMsgId": "8102", "ownerId": "6120000000000000643", "destId": "555"}));
+        msg.is_outgoing = true;
+        assert_eq!(delete_target(&msg, "g555", true, "777", 9).unwrap()["ownerId"], json!("777"));
+        msg.is_outgoing = false;
+        msg.wire_ref = Default::default();
+        assert!(delete_target(&msg, "g555", true, "777", 9).is_err());
+    }
+
     #[test]
     fn reactions_target_the_client_message_id() {
         let mut msg = ChatMessage { id: "8102".into(), ts: 1_795_000_000_000, client_message_id: "1795000000123".into(), ..Default::default() };

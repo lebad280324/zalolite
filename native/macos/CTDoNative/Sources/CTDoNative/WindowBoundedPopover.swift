@@ -11,15 +11,21 @@ extension EnvironmentValues {
     }
 }
 
-/// Window-space room around an anchor, used to keep popovers inside the app window.
-/// AppKit places popovers against the screen, so a tall card beside a row near the
-/// window's bottom edge would otherwise hang below the window.
+/// Room around an anchor, used to keep popovers on screen. AppKit places popovers against the
+/// screen, so the room is measured to the screen's usable edges, not the window's: a card opened
+/// from the middle of a short window may still use the screen height above or below it.
 enum PopoverRoom {
     static let margin: CGFloat = 14
     /// Opens towards the larger side; returns that edge and the content height that fits there.
     static func vertical(anchor: CGRect, windowHeight: CGFloat) -> (edge: Edge, maxHeight: CGFloat) {
-        let above = anchor.minY - margin * 2
-        let below = windowHeight - anchor.maxY - margin * 2
+        var above = anchor.minY - margin * 2
+        var below = windowHeight - anchor.maxY - margin * 2
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow, let content = window.contentView, let screen = window.screen {
+            // SwiftUI global frames start at the content view's top-left corner.
+            let top = window.convertToScreen(content.convert(content.bounds, to: nil)).maxY
+            above = (screen.visibleFrame.maxY - (top - anchor.minY)) - margin * 2
+            below = ((top - anchor.maxY) - screen.visibleFrame.minY) - margin * 2
+        }
         return above > below ? (.top, max(200, above)) : (.bottom, max(200, below))
     }
     static var windowHeight: CGFloat {

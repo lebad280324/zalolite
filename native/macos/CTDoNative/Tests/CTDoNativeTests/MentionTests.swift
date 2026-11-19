@@ -26,4 +26,11 @@ final class MentionTests: XCTestCase {
         let chosen = [ComposerMention(uid: "1", name: "An"), ComposerMention(uid: "1", name: "An")]
         XCTAssertEqual(ComposerAssistText.mentionRanges("@An và @An", chosen: chosen).map(\.pos), [0, 7])
     }
+
+    func testTaggedNamesLinkToTheNameWithoutAt() {
+        let styled = MessageTypography.withMentions("Nhờ @Huyền Phạm xem", outgoing: false)
+        let links = styled.runs.compactMap { $0.link }
+        XCTAssertEqual(links.map(\.scheme), [MessageTypography.mentionScheme])
+        XCTAssertEqual(links.map(\.path), ["Huyền Phạm"])
+    }
 }

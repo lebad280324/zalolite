@@ -45,3 +45,7 @@ the pointer.
 
 - No live reaction has been sent with the new `cMsgID`. Confirm on a phone before release.
 - The quick-reaction placement has not been checked by hand.
+
+## Update 2026-11-19
+
+The quick-reaction button was removed at the user's request; reactions are added from the message menu (right click) again.

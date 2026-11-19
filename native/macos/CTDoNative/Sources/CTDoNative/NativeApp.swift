@@ -111,6 +111,8 @@ struct CTDoNativeApp: App {
             SettingsView().environmentObject(store)
                 .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
         }
+        // Settings opened at a fixed size; it now resizes down to the content's minimum.
+        .windowResizability(.contentMinSize)
         // Stays reachable while the window is closed and the app keeps running in the background.
         MenuBarExtra(isInserted: Binding(get: { menuBarIcon && !BackgroundMode.isDemo }, set: { menuBarIcon = $0 })) {
             MenuBarContent().environmentObject(store)

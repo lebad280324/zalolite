@@ -14,18 +14,31 @@ struct RootView: View {
     @State private var searchFocusRequest = UUID()
     @StateObject private var recentSearches = RecentSearchHistory()
     @AppStorage("nativePrioritySplit") private var prioritySplit = false
+    @AppStorage(AccountTabs.key) private var accountTabs = false
     @State private var threadMenu: ThreadMenuTarget?
     @State private var hoveredThread = HoverBox()
     @State private var rootFrame = FrameBox()
     @StateObject private var threadMenuMonitor = MessageMenuMonitor()
 
-    var body: some View {
+    /// Workspace, the account switch screen, or sign-in.
+    @ViewBuilder private var rootContent: some View {
         Group {
             if store.session.loggedIn { workspace }
+            else if let account = store.switchingTo { AccountSwitchingView(account: account).transition(.opacity) }
             else { LoginView() }
         }
+        .animation(reducedMotion ? nil : .easeInOut(duration: 0.22), value: store.switchingTo?.uin)
+        .animation(reducedMotion ? nil : .easeInOut(duration: 0.22), value: store.session.loggedIn)
+    }
+
+    @ViewBuilder private var rootBackground: some View {
+        if store.session.loggedIn || store.switchingTo != nil { ChatBackgroundView(thread: store.selectedThread) } else { WorkspaceBackdrop() }
+    }
+
+    var body: some View {
+        rootContent
         // The wallpaper stays when no conversation is open, e.g. right after launch.
-        .background { if store.session.loggedIn {ChatBackgroundView(thread:store.selectedThread)} else {WorkspaceBackdrop()} }
+        .background { rootBackground }
         .background(NativeWindowChrome { radius in if abs(store.windowCornerRadius - radius) > 0.5 { store.windowCornerRadius = radius } })
         .onAppear { let open = openWindow; store.openMainWindow = { open(id: "main") } }
         .onValueChange(of: store.session.uin, initial: true) { _, account in
@@ -112,7 +125,8 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .replaceImageViewer)) { note in
             if viewerURL != nil, let url = note.object as? URL { viewerURL = url }
         }
-        .overlay { if store.isLocked { LockedWorkspace() } }
+        .overlay { if store.isLocked { LockedWorkspace().transition(.opacity) } }
+        .animation(reducedMotion ? nil : .easeOut(duration: 0.25), value: store.isLocked)
         // A new reading size changes every row's height.
         .onReceive(NotificationCenter.default.publisher(for: .messageTextSizeChanged)) { _ in store.transcript.presentationVersion += 1 }
         .overlay(alignment: .top) { CallOverlayView().padding(.top, 58) }
@@ -172,6 +186,7 @@ struct RootView: View {
 
     private var threadList: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if accountTabs && !store.demo { AccountTabs() }
             if prioritySplit && store.supports("set_thread_priority") && store.searchText.isEmpty { PriorityTabs() }
             if !store.ready {
                 HStack(spacing: 6) {

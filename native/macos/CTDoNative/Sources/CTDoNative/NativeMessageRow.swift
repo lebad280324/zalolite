@@ -828,7 +828,19 @@ final class TranscriptRowView: NSTableRowView {
 
 /// Lets event monitors ask which message is under the pointer without per-row tracking areas.
 @MainActor enum TranscriptPointer {
-    static weak var active: NativeTranscript.Coordinator?
-    static func messageID() -> String? { active?.messageUnderPointer() }
-    static func hover() -> (id: String, outgoing: Bool, rect: CGRect, bubble: Bool)? { active?.hoverUnderPointer() }
+    /// Every live transcript: the main window's and a chat bubble's small chat can be open together.
+    private static let all = NSHashTable<NativeTranscript.Coordinator>.weakObjects()
+    static weak var active: NativeTranscript.Coordinator? {
+        didSet { if let active { all.add(active) } }
+    }
+    /// The transcript in the window under the pointer, so a right click or swipe reaches the
+    /// conversation it was made over rather than the one that laid out last.
+    private static var underPointer: NativeTranscript.Coordinator? {
+        let mouse = NSEvent.mouseLocation
+        return all.allObjects.first { coordinator in
+            guard let window = coordinator.window, window.isVisible else { return false }
+            return window.frame.contains(mouse) && NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0) == window.windowNumber
+        } ?? active
+    }
+    static func messageID() -> String? { underPointer?.messageUnderPointer() }
 }

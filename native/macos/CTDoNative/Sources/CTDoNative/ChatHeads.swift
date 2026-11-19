@@ -3,8 +3,10 @@ import Combine
 import SwiftUI
 import NativeBridge
 
-/// Floating chat bubbles: while the main window is not in front, conversations that receive new messages
-/// appear as avatars at the screen edge, above other apps. Clicking one opens a small chat beside it.
+/// Floating chat bubbles: a Zalolite icon always sits at the screen edge, above other apps. Clicking it
+/// opens a picker of conversations, like Messenger's new message panel; a chosen conversation, or one
+/// that receives a message while you are away from the main window, becomes a bubble below the icon.
+/// Clicking a bubble opens the full conversation beside it.
 @MainActor
 final class ChatHeads: ObservableObject {
     static let shared = ChatHeads()
@@ -15,7 +17,7 @@ final class ChatHeads: ObservableObject {
     static let avatarSize: CGFloat = 52
     private static let padding: CGFloat = 14
     private static let spacing: CGFloat = 10
-    static let chatSize = NSSize(width: 360, height: 500)
+    static let chatSize = NSSize(width: 420, height: 620)
 
     static var enabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
 
@@ -31,15 +33,21 @@ final class ChatHeads: ObservableObject {
     @Published private(set) var preview: ChatHeadPreview?
     /// The bubble column sits on the right edge; the chat and card open towards the left.
     @Published private(set) var onRightEdge = true
+    /// The conversation picker opened from the Zalolite icon.
+    @Published private(set) var pickerOpen = false
 
     private weak var store: AppStore?
     private var stackPanel: FloatingPanel?
     private var chatPanel: FloatingPanel?
     private var previewPanel: FloatingPanel?
+    private var pickerPanel: FloatingPanel?
+    static let pickerSize = NSSize(width: 340, height: 520)
     private static let previewSize = NSSize(width: 270, height: 76)
     private static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     private var subscriptions: Set<AnyCancellable> = []
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
+    private var dismissMonitors: [Any] = []
+    private var lastEnabled = true
 
     /// The conversation shown in an open, visible small chat; it counts as being read.
     var readingThreadID: String? { chatPanel?.isVisible == true ? openID : nil }
@@ -65,8 +73,16 @@ final class ChatHeads: ObservableObject {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.prune(threads) } }
         }.store(in: &subscriptions)
         center.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main).sink { [weak self] _ in
-            MainActor.assumeIsolated { if !ChatHeads.enabled, self?.heads.isEmpty == false { self?.clear() } }
+            MainActor.assumeIsolated {
+                // Only a change of the setting itself shows or hides the icon.
+                guard let self, self.lastEnabled != ChatHeads.enabled else { return }
+                self.lastEnabled = ChatHeads.enabled
+                if !ChatHeads.enabled { self.clear() } else { self.refresh() }
+            }
         }.store(in: &subscriptions)
+        lastEnabled = ChatHeads.enabled
+        installDismissMonitors()
+        DispatchQueue.main.async { MainActor.assumeIsolated { self.refresh() } }
     }
 
     // MARK: State changes
@@ -116,6 +132,20 @@ final class ChatHeads: ObservableObject {
         show(threadID)
     }
 
+    /// The Zalolite icon: opens or closes the conversation picker.
+    func togglePicker() {
+        pickerOpen.toggle()
+        if pickerOpen { openID = nil; preview = nil }
+        refresh()
+        if pickerOpen { pickerPanel?.makeKeyAndOrderFront(nil) }
+    }
+
+    /// A conversation chosen in the picker becomes a bubble and opens.
+    func pick(_ threadID: String) {
+        pickerOpen = false
+        open(threadID)
+    }
+
     func toggle(_ threadID: String) {
         if openID == threadID && chatPanel?.isVisible == true { collapse() } else { show(threadID) }
     }
@@ -123,6 +153,52 @@ final class ChatHeads: ObservableObject {
     func collapse() {
         openID = nil
         refresh()
+    }
+
+    /// Folds the small chat and the picker, as a click elsewhere or Esc does.
+    func dismissPopups() {
+        guard openID != nil || pickerOpen else { return }
+        openID = nil; pickerOpen = false
+        refresh()
+    }
+
+    /// A click outside the open chat or picker, in another app or another Zalolite window, folds it;
+    /// so does Esc inside it. Its own popovers, menus and file panels do not count as outside.
+    private func installDismissMonitors() {
+        guard dismissMonitors.isEmpty else { return }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.dismissPopups() }
+        }) { dismissMonitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown], handler: { [weak self] event in
+            nonisolated(unsafe) let captured = event
+            let consumed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, self.openID != nil || self.pickerOpen else { return false }
+                if captured.type == .keyDown {
+                    // Esc in the chat or picker itself; a popover or panel of its own handles its own Esc.
+                    guard captured.keyCode == 53, let window = captured.window,
+                          window === self.chatPanel || window === self.pickerPanel else { return false }
+                    self.dismissPopups()
+                    return true
+                }
+                if !self.belongsToPopups(captured.window) { self.dismissPopups() }
+                return false
+            }
+            return consumed ? nil : event
+        }) { dismissMonitors.append(local) }
+    }
+
+    private func belongsToPopups(_ window: NSWindow?) -> Bool {
+        guard var current = window else { return false }
+        let own: [NSWindow?] = [chatPanel, pickerPanel, stackPanel, previewPanel]
+        while true {
+            if own.contains(where: { $0 === current }) { return true }
+            // Emoji and sticker popovers, menus and the attachment panel are part of the chat.
+            if current is NSOpenPanel || current is NSSavePanel { return true }
+            let name = String(describing: type(of: current))
+            if name.contains("Popover") || name.contains("Menu") { return true }
+            guard let parent = current.parent ?? current.sheetParent else { return false }
+            current = parent
+        }
     }
 
     func remove(_ threadID: String) {
@@ -134,7 +210,7 @@ final class ChatHeads: ObservableObject {
     }
 
     func clear() {
-        heads = []; openID = nil; preview = nil; pulses = [:]; unseen = [:]
+        heads = []; openID = nil; preview = nil; pulses = [:]; unseen = [:]; pickerOpen = false
         refresh()
     }
 
@@ -160,6 +236,7 @@ final class ChatHeads: ObservableObject {
         store.selectThread(threadID)
         guard store.selectedThreadID == threadID else { return }
         openID = threadID
+        pickerOpen = false
         unseen[threadID] = nil
         if preview?.threadID == threadID { preview = nil }
         refresh()
@@ -211,7 +288,7 @@ final class ChatHeads: ObservableObject {
 
     private func windowFocusChanged(_ note: Notification) {
         // Back in the main window: it shows the same conversation, so the small chat folds away.
-        if mainWindowInFront, openID != nil { openID = nil }
+        if mainWindowInFront, openID != nil || pickerOpen { openID = nil; pickerOpen = false }
         if (note.object as? NSWindow) === chatPanel, note.name == NSWindow.didBecomeKeyNotification,
            let openID, let store, store.selectedThreadID != openID {
             store.selectThread(openID)
@@ -223,10 +300,10 @@ final class ChatHeads: ObservableObject {
 
     func refresh() {
         guard let store else { return }
-        let visible = Self.enabled && store.session.loggedIn && !store.isLocked && !heads.isEmpty
-            && (openID != nil || !mainWindowInFront)
+        // The Zalolite icon stays on screen whenever bubbles are on, even with no bubble below it.
+        let visible = Self.enabled && store.session.loggedIn && !store.isLocked
         guard visible else {
-            fadeOut(stackPanel); fadeOut(chatPanel); fadeOut(previewPanel)
+            fadeOut(stackPanel); fadeOut(chatPanel); fadeOut(previewPanel); fadeOut(pickerPanel)
             return
         }
         let stack = stackPanel ?? makeStackPanel(store)
@@ -253,8 +330,17 @@ final class ChatHeads: ObservableObject {
             fadeOut(chatPanel)
         }
 
+        if pickerOpen {
+            let picker = pickerPanel ?? makePickerPanel(store)
+            pickerPanel = picker
+            place(picker, size: Self.pickerSize, slot: 0)
+            fadeIn(picker)
+        } else {
+            fadeOut(pickerPanel)
+        }
+
         // The card would cover the open chat, so it waits until the chat is folded.
-        if let preview, openID == nil, heads.contains(preview.threadID), dragStart == nil {
+        if let preview, openID == nil, !pickerOpen, heads.contains(preview.threadID), dragStart == nil {
             let card = previewPanel ?? makePreviewPanel(store)
             previewPanel = card
             placePreview(card, threadID: preview.threadID)
@@ -291,7 +377,7 @@ final class ChatHeads: ObservableObject {
     private func placePreview(_ card: NSPanel, threadID: String) {
         guard let stack = stackPanel, let area = (stack.screen ?? NSScreen.main)?.visibleFrame else { return }
         let size = Self.previewSize
-        let index = CGFloat(heads.firstIndex(of: threadID) ?? 0)
+        let index = CGFloat(slot(threadID))
         let bubbleMidY = stack.frame.maxY - Self.padding - index * (Self.avatarSize + Self.spacing) - Self.avatarSize / 2
         var x = onRightEdge ? stack.frame.minX - size.width + 6 : stack.frame.maxX - 6
         x = min(area.maxX - size.width, max(area.minX, x))
@@ -305,23 +391,35 @@ final class ChatHeads: ObservableObject {
         return panel
     }
 
+    /// Position in the column: the Zalolite icon is slot 0, bubbles follow.
+    private func slot(_ threadID: String) -> Int { (heads.firstIndex(of: threadID) ?? 0) + 1 }
+
     private var stackSize: NSSize {
-        let count = CGFloat(max(1, heads.count))
+        let count = CGFloat(heads.count + 1)
         return NSSize(width: Self.avatarSize + Self.padding * 2,
                       height: count * Self.avatarSize + (count - 1) * Self.spacing + Self.padding * 2)
     }
 
     private func placeChat(_ chat: NSPanel) {
+        place(chat, size: Self.chatSize, slot: slot(openID ?? ""))
+    }
+
+    /// Beside the column, top-aligned with the icon or bubble in `slot`, kept on screen.
+    private func place(_ panel: NSPanel, size: NSSize, slot: Int) {
         guard let stack = stackPanel, let area = (stack.screen ?? NSScreen.main)?.visibleFrame else { return }
-        let size = Self.chatSize
         let rightEdge = stack.frame.midX > area.midX
         var x = rightEdge ? stack.frame.minX - size.width + 4 : stack.frame.maxX - 4
         x = min(area.maxX - size.width, max(area.minX, x))
-        // Top-aligned with the bubble that opened it, kept on screen.
-        let index = CGFloat(heads.firstIndex(of: openID ?? "") ?? 0)
-        let bubbleTop = stack.frame.maxY - Self.padding - index * (Self.avatarSize + Self.spacing)
-        let y = min(area.maxY - size.height, max(area.minY, bubbleTop - size.height + 8))
-        chat.setFrame(NSRect(x: x, y: max(area.minY, y), width: size.width, height: size.height), display: true)
+        let top = stack.frame.maxY - Self.padding - CGFloat(slot) * (Self.avatarSize + Self.spacing)
+        let y = min(area.maxY - size.height, max(area.minY, top - size.height + 8))
+        panel.setFrame(NSRect(x: x, y: max(area.minY, y), width: size.width, height: size.height), display: true)
+    }
+
+    private func makePickerPanel(_ store: AppStore) -> FloatingPanel {
+        let panel = FloatingPanel(key: true)
+        panel.hasShadow = true
+        panel.contentView = NSHostingView(rootView: ChatHeadPicker(heads: self).environmentObject(store))
+        return panel
     }
 
     private func makeStackPanel(_ store: AppStore) -> FloatingPanel {
@@ -343,7 +441,7 @@ final class ChatHeads: ObservableObject {
     func drag() {
         guard let stack = stackPanel else { return }
         let mouse = NSEvent.mouseLocation
-        if dragStart == nil { dragStart = (mouse, stack.frame.origin); chatPanel?.orderOut(nil); previewPanel?.orderOut(nil) }
+        if dragStart == nil { dragStart = (mouse, stack.frame.origin); chatPanel?.orderOut(nil); previewPanel?.orderOut(nil); pickerPanel?.orderOut(nil) }
         guard let start = dragStart else { return }
         stack.setFrameOrigin(NSPoint(x: start.origin.x + mouse.x - start.mouse.x, y: start.origin.y + mouse.y - start.mouse.y))
     }
@@ -432,6 +530,7 @@ struct ChatHeadStack: View {
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
     var body: some View {
         VStack(spacing: 10) {
+            ChatHeadLauncher(heads: heads)
             ForEach(heads.heads, id: \.self) { id in
                 if let thread = store.threads.first(where: { $0.id == id }) {
                     ChatHeadBubble(thread: thread, isOpen: heads.openID == id, pulse: heads.pulses[id] ?? 0,
@@ -467,6 +566,11 @@ struct ChatHeadBubble: View {
             // The avatar sits in a glass disc; the open conversation's disc takes the accent tint.
             .chatHeadGlass(Circle(), interactive: true, tint: isOpen ? Color.accentColor.opacity(0.55) : nil)
             .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+            // Only the disc opens or drags; the close button and badge sit outside it and must stay
+            // clickable (the hit shape used to be set after them and swallowed the ✕).
+            .contentShape(Circle())
+            .onTapGesture { heads.toggle(thread.id) }
+            .gesture(DragGesture(minimumDistance: 4).onChanged { _ in heads.drag() }.onEnded { _ in heads.endDrag() })
             .scaleEffect(bounce ? 1.16 : hovering ? 1.05 : 1)
             .rotationEffect(.degrees(bounce ? -6 : 0))
             .animation(reducedMotion ? nil : .spring(response: 0.28, dampingFraction: 0.45), value: bounce)
@@ -495,17 +599,15 @@ struct ChatHeadBubble: View {
             .overlay(alignment: .topLeading) {
                 if hovering {
                     Button { heads.remove(thread.id) } label: {
-                        Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                            .frame(width: 20, height: 20)
+                        Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                            .frame(width: 22, height: 22)
                             .chatHeadGlass(Circle(), interactive: true)
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain).offset(x: -5, y: -4).help("Đóng bong bóng")
                 }
             }
-            .contentShape(Circle())
             .onHover { hovering = $0 }
-            .onTapGesture { heads.toggle(thread.id) }
-            .gesture(DragGesture(minimumDistance: 4).onChanged { _ in heads.drag() }.onEnded { _ in heads.endDrag() })
             .contextMenu {
                 Button(isOpen ? "Thu nhỏ" : "Mở trò chuyện") { heads.toggle(thread.id) }
                 Button("Mở trong Zalolite") { heads.openInMainWindow(thread.id) }
@@ -538,10 +640,11 @@ struct ChatHeadWindow: View {
     var body: some View {
         Group {
             if let thread {
-                transcript(thread)
-                    // Messages scroll underneath the floating header and composer.
-                    .safeAreaInset(edge: .top, spacing: 0) { header(thread).padding(.horizontal, 8).padding(.top, 8) }
-                    .safeAreaInset(edge: .bottom, spacing: 0) { composer(thread).padding(.horizontal, 8).padding(.bottom, 8) }
+                // The full conversation (native rows, polls, menus, composer with files and stickers),
+                // under the bubble's own header.
+                ConversationView(thread: thread, customHeader: AnyView(header(thread).padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 4)))
+                    .id(thread.id)
+                    .background { ChatBackgroundView(thread: thread) }
             } else {
                 Color.clear
             }
@@ -718,5 +821,129 @@ struct ChatHeadPreviewCard: View {
     private func slideIn() {
         shown = false
         withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { shown = true }
+    }
+}
+
+/// The Zalolite icon at the top of the bubble column: opens the conversation picker, shows the unread
+/// total, and drags the column like a bubble.
+struct ChatHeadLauncher: View {
+    @EnvironmentObject private var store: AppStore
+    @ObservedObject var heads: ChatHeads
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reducedMotion
+    private var unread: Int { store.threads.filter { !$0.muted && !$0.hidden }.reduce(0) { $0 + max($1.unread, $1.markedUnread ? 1 : 0) } }
+    private let size = ChatHeads.avatarSize
+
+    var body: some View {
+        Image(nsImage: NSApp.applicationIconImage)
+            .resizable().interpolation(.high)
+            .frame(width: size - 6, height: size - 6)
+            .padding(3)
+            .chatHeadGlass(Circle(), interactive: true, tint: heads.pickerOpen ? Color.accentColor.opacity(0.45) : nil)
+            .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+            .scaleEffect(hovering ? 1.05 : 1)
+            .animation(reducedMotion ? nil : .spring(response: 0.3, dampingFraction: 0.7), value: hovering)
+            .overlay(alignment: .topTrailing) {
+                if unread > 0 && !heads.pickerOpen {
+                    Text(unread > 99 ? "99+" : "\(unread)")
+                        .font(.system(size: 12, weight: .bold)).monospacedDigit().foregroundStyle(.white)
+                        .padding(.horizontal, 6).frame(minWidth: 22, minHeight: 22)
+                        .background(Capsule().fill(Color.red))
+                        .overlay { Capsule().strokeBorder(.white.opacity(0.9), lineWidth: 1.5) }
+                        .offset(x: 6, y: -5)
+                }
+            }
+            .contentShape(Circle())
+            .onHover { hovering = $0 }
+            .onTapGesture { heads.togglePicker() }
+            .gesture(DragGesture(minimumDistance: 4).onChanged { _ in heads.drag() }.onEnded { _ in heads.endDrag() })
+            .contextMenu {
+                Button(heads.pickerOpen ? "Đóng danh sách" : "Tin nhắn mới…") { heads.togglePicker() }
+                Button("Mở Zalolite") { store.showMainWindow() }
+                Divider()
+                Button("Tắt bong bóng chat") { UserDefaults.standard.set(false, forKey: ChatHeads.enabledKey); heads.refresh() }
+            }
+            .help("Zalolite: chọn người để nhắn tin")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(unread > 0 ? "Zalolite, \(unread) tin chưa đọc" : "Zalolite")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { heads.togglePicker() }
+    }
+}
+
+/// "Tin nhắn mới": search and pick a conversation to chat with in a bubble, like Messenger's panel.
+struct ChatHeadPicker: View {
+    @EnvironmentObject private var store: AppStore
+    @ObservedObject var heads: ChatHeads
+    @State private var query = ""
+    @FocusState private var focused: Bool
+
+    private var results: [ThreadSnapshot] {
+        let visible = store.threads.filter { !$0.hidden }
+        let matched = query.isEmpty ? visible : visible.filter { $0.name.localizedStandardContains(query) }
+        return Array(matched.sorted { lhs, rhs in
+            if lhs.pinned != rhs.pinned { return lhs.pinned }
+            return lhs.lastMessageTimestamp > rhs.lastMessageTimestamp
+        }.prefix(60))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Tin nhắn mới").font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Button { heads.togglePicker() } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).frame(width: 28, height: 28)
+                        .chatHeadGlass(Circle(), interactive: true)
+                }
+                .buttonStyle(.plain).help("Đóng").keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+            HStack(spacing: 8) {
+                Text("Đến:").foregroundStyle(.secondary)
+                TextField("Tên người hoặc nhóm", text: $query)
+                    .textFieldStyle(.plain).focused($focused)
+                    .onSubmit { if let first = results.first { heads.pick(first.id) } }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            Divider().padding(.horizontal, 12)
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(results) { thread in
+                        Button { heads.pick(thread.id) } label: {
+                            HStack(spacing: 12) {
+                                ThreadAvatar(thread: thread, size: 40)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(verbatim: thread.name).font(.system(size: 14, weight: thread.hasUnread ? .semibold : .regular)).lineLimit(1)
+                                    if !thread.lastMessage.isEmpty {
+                                        Text(verbatim: thread.lastMessage).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                Spacer(minLength: 4)
+                                if thread.unread > 0 {
+                                    Text(thread.unread > 99 ? "99+" : "\(thread.unread)")
+                                        .font(.system(size: 11, weight: .bold)).monospacedDigit().foregroundStyle(.white)
+                                        .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18)
+                                        .background(Capsule().fill(Color.red))
+                                }
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(MenuRowStyle())
+                    }
+                    if results.isEmpty {
+                        Text(query.isEmpty ? "Chưa có cuộc trò chuyện" : "Không tìm thấy “\(query)”")
+                            .font(.callout).foregroundStyle(.secondary).padding(.top, 30)
+                    }
+                }
+                .padding(.horizontal, 6).padding(.vertical, 6)
+            }
+        }
+        .frame(width: ChatHeads.pickerSize.width, height: ChatHeads.pickerSize.height)
+        .chatHeadGlass(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .onAppear { focused = true }
+        .onValueChange(of: heads.pickerOpen) { _, open in if open { query = ""; focused = true } }
     }
 }

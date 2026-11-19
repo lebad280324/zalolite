@@ -19,6 +19,10 @@ struct LockedWorkspace: View {
     @State private var failed = false
     @State private var asking = false
     @State private var prompted = false
+    /// Set once the Mac accepted Touch ID or the password: the lock opens, then the screen dissolves.
+    @State private var unlocking = false
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reducedMotion
 
     private var pictured: Bool { choice == "chat" || (choice == "image" && image != nil) }
     private var biometric: Bool {
@@ -28,12 +32,15 @@ struct LockedWorkspace: View {
     var body: some View {
         ZStack {
             background
+                .opacity(unlocking ? 0 : 1)
             VStack(spacing: 14) {
-                Image(systemName: "lock.fill")
+                Image(systemName: unlocking ? "lock.open.fill" : "lock.fill")
                     .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(unlocking ? Color.green : Color.accentColor)
+                    .replaceSymbolTransition()
                     .frame(width: 72, height: 72)
-                    .background(Color.accentColor.opacity(0.12), in: Circle())
+                    .background((unlocking ? Color.green : Color.accentColor).opacity(0.12), in: Circle())
+                    .scaleEffect(unlocking && !reducedMotion ? 1.12 : 1)
                 Text("Zalolite đã khóa").font(.title2.bold())
                 Text("Mở khóa để xem tin nhắn. Thông báo vẫn đến, nhưng không hiện nội dung.")
                     .multilineTextAlignment(.center).opacity(0.8).frame(maxWidth: 360)
@@ -60,6 +67,10 @@ struct LockedWorkspace: View {
                 }
             }
             .padding(32)
+            // The card settles in when locking and lifts away when unlocked.
+            .scaleEffect(reducedMotion ? 1 : unlocking ? 1.06 : appeared ? 1 : 0.96)
+            .opacity(unlocking ? 0 : 1)
+            .blur(radius: unlocking && !reducedMotion ? 6 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
@@ -70,6 +81,7 @@ struct LockedWorkspace: View {
             image = await Task.detached { NSImage(contentsOfFile: path) }.value
         }
         .onAppear {
+            withAnimation(reducedMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85)) { appeared = true }
             // Ask once on its own, like other Mac apps with a lock; later attempts come from the button.
             guard !prompted, NSApp.isActive else { return }
             prompted = true; unlock()
@@ -91,12 +103,19 @@ struct LockedWorkspace: View {
         }
     }
 
+    /// The lock icon opens, the card lifts and the screen fades, then the workspace takes over.
+    private func open() {
+        guard !reducedMotion else { store.isLocked = false; return }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.6)) { unlocking = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { store.isLocked = false }
+    }
+
     private func unlock() {
         guard !asking else { return }
         asking = true; failed = false
         NativeSystem.unlock { success in
             asking = false
-            if success { store.isLocked = false } else { failed = true }
+            if success { open() } else { failed = true }
         }
     }
 }

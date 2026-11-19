@@ -98,6 +98,7 @@ extension AppStore {
         }
     }
     func downloadMedia(_ message: MessageSnapshot, copyImage: Bool = false) {
+        if copyImage { copyPhoto(message); return }
         guard supports("download_media"), let url = safeWebURL(message.imageURL ?? message.fileURL) else { return }
         // A chosen default folder skips the panel; "always ask" keeps the explicit choice.
         var isDirectory: ObjCBool = false
@@ -118,6 +119,19 @@ extension AppStore {
             }
         }
     }
+    /// Copies the photo straight to the clipboard at full size: the imported copy when there is one,
+    /// otherwise the image Zalo serves. It used to ask for a folder and save a file first.
+    func copyPhoto(_ message: MessageSnapshot) {
+        guard let url = MediaSource.photo(message) else { return }
+        Task { @MainActor [weak self] in
+            let image: NSImage? = url.isFileURL ? NSImage(contentsOf: url) : await AnimatedImageCache.image(for: url)
+            guard let image else { self?.error = "Không tải được ảnh để sao chép. Hãy thử lại."; return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([image])
+            self?.connection = "Đã sao chép ảnh"
+        }
+    }
+
     func handleBAResult(command: String, data: JSONValue?, threadID: String?, requestID: String) {
         switch command {
         case "get_workspace_features": features.workspace = data; NativeSystem.refreshReminders(self)

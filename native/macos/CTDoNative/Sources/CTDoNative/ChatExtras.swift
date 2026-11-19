@@ -249,7 +249,7 @@ struct MessageActionMenu: View {
                         }
                     }
                     if message.imageURL != nil && message.messageType != "chat.sticker" && store.supports("download_media") {
-                        row("Sao chép ảnh", "photo") { store.downloadMedia(message, copyImage: true) }
+                        row("Sao chép ảnh", "photo") { store.copyPhoto(message) }
                     }
                     if store.supports("pin_message_local") {
                         row(pinned ? "Bỏ ghim" : "Ghim", pinned ? "pin.slash" : "pin") {
@@ -279,6 +279,9 @@ struct MessageActionMenu: View {
                     if store.supports("recall_message") && message.isOutgoing { row("Thu hồi", "arrow.uturn.backward", destructive: true, run: recall) }
                     if store.supports("delete_message") {
                         row("Xóa ở phía tôi", "trash", destructive: true) { store.messageAction("delete_message", message: message) }
+                        if store.canDeleteForEveryone(message, in: thread) {
+                            row("Xóa cho cả nhóm", "trash.slash", destructive: true) { store.deleteForEveryoneCandidate = message; close() }
+                        }
                     }
                 }
                 .padding(6).frame(width: 236)

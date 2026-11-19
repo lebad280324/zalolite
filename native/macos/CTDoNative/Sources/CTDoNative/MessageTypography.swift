@@ -36,6 +36,9 @@ enum MessageTypography {
         return mentionPattern.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
 
+    /// Links on tagged names use this scheme; the path is the name without "@".
+    static let mentionScheme = "zalolite-mention"
+
     /// Message text with tagged names set apart from the words around them.
     static func withMentions(_ text: String, outgoing: Bool) -> AttributedString {
         var result = inline(text)
@@ -48,6 +51,10 @@ enum MessageTypography {
                   let upper = AttributedString.Index(range.upperBound, within: result) else { continue }
             // Same size and weight as the words around it; only colour sets the tag apart.
             result[lower..<upper].foregroundColor = outgoing ? OutgoingBubble.current.textColor : .accentColor
+            // A click opens the tagged person's profile (handled by the row's openURL action).
+            let name = String(plain[range].dropFirst())
+            var components = URLComponents(); components.scheme = mentionScheme; components.path = name
+            if let url = components.url { result[lower..<upper].link = url }
             if outgoing { result[lower..<upper].backgroundColor = Color.white.opacity(0.18) }
         }
         return result
