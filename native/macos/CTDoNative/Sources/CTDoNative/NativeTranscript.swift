@@ -152,6 +152,24 @@ extension EnvironmentValues {
             return displayed.indices.contains(row) ? displayed[row].id : nil
         }
 
+        /// The hovered message and its bubble in window coordinates; rows drawn in SwiftUI report
+        /// the whole row, so the quick reactions sit at the column edge for them.
+        func hoverUnderPointer() -> (id: String, outgoing: Bool, rect: CGRect, bubble: Bool)? {
+            guard let table, let scroll, let window = table.window else { return nil }
+            let point = table.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            guard scroll.contentView.bounds.contains(point) else { return nil }
+            let row = table.row(at: point)
+            guard displayed.indices.contains(row) else { return nil }
+            let message = displayed[row].message
+            guard message.messageType != "chat.system" else { return nil }
+            if let layout = nativeLayout(displayed[row]), layout.bubble.width > 0,
+               let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? NativeMessageCell {
+                // The drawing view's bounds use the row layout's own coordinates.
+                return (message.id, message.isOutgoing, cell.content.convert(layout.bubble, to: nil), true)
+            }
+            return (message.id, message.isOutgoing, table.convert(table.rect(ofRow: row), to: nil), false)
+        }
+
         init(_ parent: NativeTranscript) { self.parent = parent }
 
         func numberOfRows(in tableView: NSTableView) -> Int { displayed.count }

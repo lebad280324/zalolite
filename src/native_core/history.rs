@@ -50,7 +50,7 @@ pub(super) fn start(
                     let current = context.lock().map(|c| c.generation == generation && c.account == account).unwrap_or(false);
                     if !current { Err(UserError("Tài khoản đã thay đổi. Hãy mở lại hội thoại.").into()) }
                     else {
-                        let messages: Vec<_> = thread.messages.iter().map(message_dto).collect();
+                        let messages: Vec<_> = thread.messages.iter().map(|m| message_dto(m, &account)).collect();
                         let cursor = thread.messages.first().map(|m| Cursor { timestamp: m.ts, id: m.id.clone() });
                         let snapshot = bounded_event(json!({"id":request.id,"event":"message_page","data":{
                             "thread_id":thread.id,"account":account,"messages":messages,"has_more":has_more,

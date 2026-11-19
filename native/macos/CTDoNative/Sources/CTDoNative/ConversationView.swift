@@ -23,6 +23,7 @@ struct ConversationView: View {
     /// Read only when a menu opens; a plain box keeps window resizes from re-evaluating this view every frame.
     @State private var columnFrame = FrameBox()
     @StateObject private var menuMonitor = MessageMenuMonitor()
+    @StateObject private var quickReactions = QuickReactionMonitor()
     /// Position in `store.conversationSearchHits` (0 = newest match).
     @State private var searchIndex = 0
     private var hasDraft: Bool {
@@ -114,7 +115,13 @@ struct ConversationView: View {
                 store.threadCommand("get_group_members", thread: thread)
             }
         }
-        .onDisappear { swipe.remove(); menuMonitor.remove() }
+        .onAppear {
+            quickReactions.install(column: { columnFrame.value }, enabled: {
+                menuTarget == nil && !store.selectingMessages && store.supports("react") && NSApp.isActive
+            })
+        }
+        .onValueChange(of: menuTarget?.message.id) { _, _ in quickReactions.hide() }
+        .onDisappear { swipe.remove(); menuMonitor.remove(); quickReactions.remove() }
         .background { GeometryReader { proxy in Color.clear.onAppear { columnFrame.value = proxy.frame(in: .global) }
             .onValueChange(of: proxy.frame(in: .global)) { _, frame in columnFrame.value = frame } } }
         .overlay(alignment: .topLeading) {
@@ -130,6 +137,22 @@ struct ConversationView: View {
                             .transition(.scale(scale: 0.92, anchor: .topLeading).combined(with: .opacity))
                     }
                 }
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let quick = quickReactions.target, menuTarget == nil,
+               let message = store.selectedMessages.first(where: { $0.id == quick.id }) {
+                let mine = ReactionChips.details(message).first { $0.reactors.contains(store.session.uin) || $0.reactors.contains("0") }?.emoji
+                QuickReactionBar(mine: mine) { emoji in
+                    // Choosing your current reaction again removes it, as in Zalo.
+                    store.messageAction("react", message: message, reaction: emoji == mine ? "" : emoji)
+                    quickReactions.hide()
+                }
+                .fixedSize()
+                .frame(width: 240, height: 40, alignment: quick.outgoing ? .bottomTrailing : .bottomLeading)
+                .offset(x: quick.outgoing ? quick.anchorX - 246 : quick.anchorX + 6, y: quick.bottom - 38)
+                .transition(.opacity)
+                .id(quick.id)
             }
         }
         .animation(reducedMotion ? nil : .snappy(duration: 0.16), value: menuTarget?.message.id)
@@ -517,9 +540,9 @@ struct MessageRow: View, Equatable {
     private var displayName: String { senderName.isEmpty ? message.senderName : senderName }
     /// Stickers play at their own size, without a bubble, like on Zalo.
     private var stickerURL: URL? { message.messageType == "chat.sticker" ? safeWebURL(message.imageURL) : nil }
-    private var primary: Color { message.isOutgoing ? .white : Color(nsColor: .labelColor) }
-    private var secondary: Color { message.isOutgoing ? .white.opacity(0.78) : Color(nsColor: .secondaryLabelColor) }
-    private var inset: Color { message.isOutgoing ? .white.opacity(0.18) : Color.accentColor.opacity(0.08) }
+    private var primary: Color { message.isOutgoing ? OutgoingBubble.current.textColor : Color(nsColor: .labelColor) }
+    private var secondary: Color { message.isOutgoing ? OutgoingBubble.current.textColor.opacity(0.78) : Color(nsColor: .secondaryLabelColor) }
+    private var inset: Color { message.isOutgoing ? OutgoingBubble.current.textColor.opacity(0.18) : Color.accentColor.opacity(0.08) }
     /// Received bubbles are near-opaque so text stays readable over any wallpaper.
     private var incomingFill: Color { scheme == .dark ? Color(white: 0.17) : .white }
     /// Media-only messages sit directly on the transcript, without a bubble.
@@ -604,9 +627,9 @@ struct MessageRow: View, Equatable {
                     if showSender && !bare { senderLine }
                     if let reply = message.replyToText, !reply.isEmpty {
                         HStack(spacing: 8) {
-                            RoundedRectangle(cornerRadius: 2).fill(message.isOutgoing ? Color.white : Color.accentColor).frame(width: 3)
+                            RoundedRectangle(cornerRadius: 2).fill(message.isOutgoing ? OutgoingBubble.current.textColor : Color.accentColor).frame(width: 3)
                             VStack(alignment: .leading, spacing: 2) {
-                                if let name = message.replyToSender { Text(verbatim: name).font(.system(size: 12, weight: .semibold)).foregroundStyle(message.isOutgoing ? .white : Color.accentColor) }
+                                if let name = message.replyToSender { Text(verbatim: name).font(.system(size: 12, weight: .semibold)).foregroundStyle(message.isOutgoing ? OutgoingBubble.current.textColor : Color.accentColor) }
                                 Text(verbatim: reply).font(.system(size: 12)).foregroundStyle(secondary).lineLimit(2)
                             }
                         }
@@ -654,7 +677,7 @@ struct MessageRow: View, Equatable {
                 }
                 .padding(.horizontal, bare ? 0 : 11).padding(.top, bare ? 0 : 6).padding(.bottom, bare ? 0 : 7)
                 .overlay(alignment: .bottomTrailing) { if !bare && caption.isEmpty { timeLabel.foregroundStyle(secondary).padding(.trailing, 9).padding(.bottom, 5) } }
-                .background { if !bare { shape.fill(message.isOutgoing ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(incomingFill)) } }
+                .background { if !bare { shape.fill(message.isOutgoing ? OutgoingBubble.current.fillStyle : AnyShapeStyle(incomingFill)) } }
                 .shadow(color: .black.opacity(bare ? 0 : 0.06), radius: 1, y: 1)
                 .overlay { if highlighted { shape.strokeBorder(Color.orange, lineWidth: 2) } }
                 .frame(maxWidth: bubbleWidth, alignment: message.isOutgoing ? .trailing : .leading)

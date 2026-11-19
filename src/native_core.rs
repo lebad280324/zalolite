@@ -445,21 +445,33 @@ struct ReactionDetailDto {
     reactor_counts: Vec<u64>,
 }
 
-fn reaction_details(message: &ChatMessage) -> Vec<ReactionDetailDto> {
+/// Zalo's reaction snapshots name this account `"0"`, while a reaction sent from here is recorded
+/// under the account's UIN. Both are the same person: `"0"` becomes the UIN, and when both are
+/// present the duplicate is dropped from the list and the count (re-notes/75).
+fn reaction_details(message: &ChatMessage, own_uid: &str) -> Vec<ReactionDetailDto> {
     message
         .reaction_summaries
         .iter()
         .filter(|summary| summary.count > 0)
-        .map(|summary| ReactionDetailDto {
-            emoji: summary.emoji.clone(),
-            count: summary.count,
-            reactors: summary.reactor_ids.iter().take(200).cloned().collect(),
-            reactor_counts: summary
-                .reactor_ids
-                .iter()
-                .take(200)
-                .map(|id| summary.reactor_counts.get(id).copied().unwrap_or(1))
-                .collect(),
+        .filter_map(|summary| {
+            let mut count = summary.count;
+            let mut reactors: Vec<(String, u64)> = Vec::new();
+            for id in &summary.reactor_ids {
+                let n = summary.reactor_counts.get(id).copied().unwrap_or(1);
+                let id = if id == "0" && !own_uid.is_empty() { own_uid.to_owned() } else { id.clone() };
+                if reactors.iter().any(|(seen, _)| seen == &id) {
+                    count = count.saturating_sub(n);
+                } else {
+                    reactors.push((id, n));
+                }
+            }
+            reactors.truncate(200);
+            (count > 0).then(|| ReactionDetailDto {
+                emoji: summary.emoji.clone(),
+                count,
+                reactors: reactors.iter().map(|(id, _)| id.clone()).collect(),
+                reactor_counts: reactors.iter().map(|(_, n)| *n).collect(),
+            })
         })
         .collect()
 }
@@ -692,7 +704,7 @@ fn poll_dto(data: &Value) -> Value {
     })
 }
 
-fn message_dto(message: &ChatMessage) -> MessageDto {
+fn message_dto(message: &ChatMessage, own_uid: &str) -> MessageDto {
     let mut hydrated = message.clone();
     hydrated.hydrate_media_metadata();
     // Older history stored link previews as photos because their thumbnail sits on the photo CDN.
@@ -756,7 +768,7 @@ fn message_dto(message: &ChatMessage) -> MessageDto {
                 .unwrap_or_else(|| hydrated.text.clone())
         }),
         reactions: hydrated.reactions.clone(),
-        reaction_details: reaction_details(&hydrated),
+        reaction_details: reaction_details(&hydrated, own_uid),
         reply_to_id: hydrated.reply_to_id,
         reply_to_sender: hydrated.reply_to_sender,
         reply_to_text: hydrated.reply_to_text,
@@ -1093,6 +1105,11 @@ impl Core {
         .await
     }
 
+    /// This account's UIN, which Zalo's reaction snapshots write as `"0"`.
+    fn own_uid(&self) -> String {
+        self.session.login.as_ref().map(|login| login.uin.clone()).unwrap_or_default()
+    }
+
     async fn emit_messages(&self, thread_id: &str, limit: usize) -> Result<()> {
         let thread = self
             .threads
@@ -1102,8 +1119,9 @@ impl Core {
         let count = limit.clamp(1, MAX_MESSAGES);
         let mut messages = Vec::new();
         let mut bytes = 0;
+        let own_uid = self.own_uid();
         for message in thread.messages.iter().rev().take(count) {
-            let message = message_dto(message);
+            let message = message_dto(message, &own_uid);
             bytes += serde_json::to_vec(&message)?.len();
             if bytes > SNAPSHOT_BYTES {
                 break;
@@ -1124,7 +1142,8 @@ impl Core {
 
     async fn emit_message_updates(&self, thread_id: &str) -> Result<()> {
         let thread=self.threads.iter().find(|thread|thread.id==thread_id).ok_or(UserError("Không tìm thấy hội thoại."))?;
-        let current:HashMap<_,_>=thread.messages.iter().map(|m|{let dto=message_dto(m);(dto.id.clone(),dto)}).collect();
+        let own_uid=self.own_uid();
+        let current:HashMap<_,_>=thread.messages.iter().map(|m|{let dto=message_dto(m,&own_uid);(dto.id.clone(),dto)}).collect();
         let changes={
             let mut cache=self.published_messages.lock().map_err(|_|anyhow!("message snapshot cache poisoned"))?;
             if cache.len()>=24 && !cache.contains_key(thread_id){cache.clear();}
@@ -2678,6 +2697,23 @@ async fn export_key_opens(path: &str, key: &str, own_uid: &str) -> Result<bool> 
 #[cfg(test)]
 mod tests {
     #[test]
+    fn own_reaction_under_zero_and_uin_counts_once() {
+        let mut message = ChatMessage { id: "m".into(), ..Default::default() };
+        message.reaction_summaries = crate::reactions::parse_reactions(&json!({"reactions": {"0": {"5": 1}, "peer": {"5": 1}}}));
+        message.apply_reaction(&crate::reactions::ReactionEvent {
+            message_id: "m".into(), sender_id: "777".into(), r_type: 5, emoji: "❤️".into(), ts: 1, ..Default::default()
+        });
+        let details = reaction_details(&message, "777");
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0].count, 2);
+        let mut reactors = details[0].reactors.clone();
+        reactors.sort();
+        assert_eq!(reactors, vec!["777".to_string(), "peer".to_string()]);
+        // Without a signed-in account "0" stays as it is.
+        assert_eq!(reaction_details(&message, "")[0].count, 3);
+    }
+
+    #[test]
     fn poll_dto_keeps_only_drawn_fields() {
         let data = json!({"poll_id": 7, "question": "Đi đâu?", "creator": "1", "joined": true, "closed": 0,
             "allow_multi_choices": 1, "num_vote": 3, "expired_time": 0, "secret": "x",
@@ -2856,7 +2892,7 @@ mod tests {
         assert!(!is_group_notice(&notice("Hà", "mai em vào nhóm kia nhé"), "77"));
         assert!(!is_group_notice(&notice("Tôi", "anh vào nhóm chưa"), ""));
         assert!(!is_group_notice(&notice("Tôi", "dòng 1\nLan đã rời khỏi nhóm"), ""));
-        let dto = message_dto(&notice("Tôi", "Thuyhoang đã rời khỏi nhóm"));
+        let dto = message_dto(&notice("Tôi", "Thuyhoang đã rời khỏi nhóm"), "");
         assert_eq!(dto.msg_type, "chat.system");
     }
 
@@ -2879,7 +2915,7 @@ mod tests {
             "content": content
         }]}});
         assert!(apply_live_reactions(&mut threads, &push));
-        let dto = message_dto(&threads[0].messages[0]);
+        let dto = message_dto(&threads[0].messages[0], "");
         assert_eq!(dto.reactions, vec!["👍".to_string()]);
         assert_eq!(dto.reaction_details[0].reactors, vec!["42".to_string()]);
         // Unrelated pushes change nothing.
@@ -2905,7 +2941,7 @@ mod tests {
             history_source: Some(json!({"zpw_enk": "never-expose"})),
             ..Default::default()
         };
-        let dto = serde_json::to_value(message_dto(&message)).unwrap();
+        let dto = serde_json::to_value(message_dto(&message, "")).unwrap();
         assert!(dto["link_url"].is_null());
         assert!(!dto.to_string().contains("never-expose")); // (INV-2)
     }
@@ -2920,7 +2956,7 @@ mod tests {
             link_src: Some("Tập tin Zalo".into()),
             ..Default::default()
         };
-        let dto = message_dto(&message);
+        let dto = message_dto(&message, "");
         assert_eq!(dto.msg_type, "share.file");
         assert_eq!(
             dto.file_url.as_deref(),

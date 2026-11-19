@@ -3907,6 +3907,18 @@ pub fn reaction_code_and_type(emoji_or_code: &str) -> (&'static str, i32) {
     }
 }
 
+/// The `cMsgID` a reaction targets. Zalo PC sends `parseInt(message.cliMsgId)` (`sendReaction`,
+/// re-notes/75). The message time is only a fallback for rows stored before the client ID was
+/// kept; sent alone, the server accepted it but matched no message, so phones showed nothing.
+pub(crate) fn reaction_client_id(msg: &ChatMessage, now: u64) -> u64 {
+    msg.client_message_id
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|id| *id > 0)
+        .unwrap_or(if msg.ts > 0 { msg.ts as u64 } else { msg.id.parse::<u64>().unwrap_or(now) })
+}
+
 /// Send a message reaction (`sendReactionMessage` in `compact-app-pc.b7bec208c4c8f73e09f8.js:14317097`, cmd `12410` / `12411`).
 pub async fn send_reaction(
     s: &Session,
@@ -3931,11 +3943,7 @@ pub async fn send_reaction(
     } else {
         json!(msg.id)
     };
-    let c_msg_id = if msg.ts > 0 {
-        msg.ts as u64
-    } else {
-        msg.id.parse::<u64>().unwrap_or(now)
-    };
+    let c_msg_id = reaction_client_id(msg, now);
 
     let inner_msg = json!({
         "rMsg": [{
@@ -3954,16 +3962,14 @@ pub async fn send_reaction(
         "clientId": now
     }]);
 
-    let (url, body) = if is_group {
+    // Zalo PC: domain REACTION, `/api/group/reaction` (12411) or `/api/message/reaction` (12410).
+    let (path, body) = if is_group {
         let clean_grid = to_id
             .trim_start_matches("group_")
             .trim_start_matches('g')
             .trim_start_matches('G');
         (
-            format!(
-                "https://reaction.api.zaloapp.com/api/group/reaction?{}",
-                s.common_params()
-            ),
+            "/api/group/reaction",
             obj(&[
                 ("react_list", react_list),
                 ("grid", json!(clean_grid)),
@@ -3972,16 +3978,19 @@ pub async fn send_reaction(
         )
     } else {
         (
-            format!(
-                "https://reaction.api.zaloapp.com/api/message/reaction?{}",
-                s.common_params()
-            ),
+            "/api/message/reaction",
             obj(&[("react_list", react_list), ("toid", json!(to_id))]),
         )
     };
 
     let params = s.encoded_params(&body)?;
-    let resp = s.post_form(&url, format!("params={params}")).await?;
+    let resp = s
+        .post_endpoint_form(
+            "reaction",
+            &format!("{path}?{}", s.common_params()),
+            format!("params={params}"),
+        )
+        .await?;
     Ok(s.maybe_decrypt(resp, s.session_key_bytes()).await)
 }
 
@@ -7618,6 +7627,14 @@ pub async fn delete_conversation(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reactions_target_the_client_message_id() {
+        let mut msg = ChatMessage { id: "8102".into(), ts: 1_795_000_000_000, client_message_id: "1795000000123".into(), ..Default::default() };
+        assert_eq!(reaction_client_id(&msg, 7), 1_795_000_000_123);
+        msg.client_message_id.clear();
+        assert_eq!(reaction_client_id(&msg, 7), 1_795_000_000_000);
+    }
+
     #[test]
     fn emoticon_codes_show_as_emoji_without_touching_text() {
         assert_eq!(display_emoticons("/-strong"), "👍");

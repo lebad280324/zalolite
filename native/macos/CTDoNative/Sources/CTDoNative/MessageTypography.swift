@@ -47,7 +47,7 @@ enum MessageTypography {
                   let lower = AttributedString.Index(range.lowerBound, within: result),
                   let upper = AttributedString.Index(range.upperBound, within: result) else { continue }
             // Same size and weight as the words around it; only colour sets the tag apart.
-            result[lower..<upper].foregroundColor = outgoing ? .white : .accentColor
+            result[lower..<upper].foregroundColor = outgoing ? OutgoingBubble.current.textColor : .accentColor
             if outgoing { result[lower..<upper].backgroundColor = Color.white.opacity(0.18) }
         }
         return result

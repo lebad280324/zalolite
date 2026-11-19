@@ -830,7 +830,7 @@ pub(super) async fn execute(
             message_id,
         } => {
             let message = message(threads, thread_id, message_id)?;
-            json!({"message":super::message_dto(&message),"client_message_id":message.client_message_id,"scope":"local"})
+            json!({"message":super::message_dto(&message,&session.login.as_ref().map(|l|l.uin.clone()).unwrap_or_default()),"client_message_id":message.client_message_id,"scope":"local"})
         }
         FeatureCommand::BookmarkMessage {
             thread_id,
@@ -986,7 +986,7 @@ pub(super) async fn execute(
             }
             if demo {
                 let query = query.to_lowercase();
-                let items=threads.iter().filter(|thread|thread_id.as_ref().is_none_or(|id|id==&thread.id)).flat_map(|thread|thread.messages.iter().filter(|message|(!files_only || message.kind==crate::message_model::MessageKind::File) && message.text.to_lowercase().contains(&query)).map(|message|json!({"thread_id":thread.id,"message":super::message_dto(message)}))).take(300).collect::<Vec<_>>();
+                let items=threads.iter().filter(|thread|thread_id.as_ref().is_none_or(|id|id==&thread.id)).flat_map(|thread|thread.messages.iter().filter(|message|(!files_only || message.kind==crate::message_model::MessageKind::File) && message.text.to_lowercase().contains(&query)).map(|message|json!({"thread_id":thread.id,"message":super::message_dto(message,"")}))).take(300).collect::<Vec<_>>();
                 json!({"items":items})
             } else {
                 let path = db_path.to_owned();

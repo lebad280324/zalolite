@@ -20,7 +20,8 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   case .privacy: return ["Ngày sinh", "Trạng thái truy cập", "Trạng thái đã xem", "Người được nhắn tin", "Người được gọi", "Danh sách chặn", "Tìm qua số điện thoại", "Nguồn kết bạn", "Đang soạn"]
   case .sync: return ["Đồng bộ từ điện thoại", "Xuất bản sao", "Nhập lịch sử", "Sao lưu"]
   case .storage: return ["Dung lượng", "Bộ nhớ đệm", "Dọn dữ liệu", "Ổ đĩa", "Thư mục dữ liệu", "Hủy tải"]
-  case .appearance: return ["Sáng", "Tối", "Theo hệ thống", "Avatar làm nền", "Ảnh thu nhỏ", "Cỡ chữ", "Font", "Phông chữ"]
+  case .appearance: return ["Sáng", "Tối", "Theo hệ thống", "Avatar làm nền", "Ảnh thu nhỏ", "Cỡ chữ", "Font", "Phông chữ",
+                            "Màu bong bóng", "Bong bóng tin nhắn", "Màu tin nhắn", "Xanh dịu", "Chói"]
   case .notifications: return ["Quyền thông báo", "Âm thanh", "Xem trước nội dung", "Huy hiệu Dock", "Cuộc gọi đến"]
   case .messages: return ["Tin nhắn nhanh", "Mẫu tin", "Ưu tiên và Khác", "Thư mục lưu tệp", "Nhấp đúp để trả lời", "Return để gửi", "Tải trước media", "Dán Excel", "Ảnh thu nhỏ"]
   case .calls: return ["Micrô", "Camera", "Loa", "Thông báo cuộc gọi đến", "Quyền thiết bị"]
@@ -277,6 +278,7 @@ struct SettingsView: View {
   case .appearance:
    Section("Màu sắc") { Picker("Chế độ", selection: $appearance) { Text("Theo hệ thống").tag("system"); Text("Sáng").tag("light"); Text("Tối").tag("dark") }; Text("Thanh công cụ, ô soạn và bảng nổi dùng Liquid Glass của macOS, tự giảm độ trong suốt theo cài đặt Trợ năng.").font(.caption).foregroundStyle(.secondary) }
    Section { ChatBackgroundPicker() } header: { Text("Hình nền cuộc trò chuyện") } footer: { Text("Áp dụng cho mọi cuộc trò chuyện trên máy này.").font(.caption).foregroundStyle(.secondary) }
+   Section { OutgoingBubblePicker() } header: { Text("Bong bóng tin nhắn") } footer: { Text("Màu cho tin bạn gửi. Xanh dịu đỡ chói hơn khi dùng chế độ tối.").font(.caption).foregroundStyle(.secondary) }
    Section { MessageTextSizePicker() } header: { Text("Cỡ chữ") } footer: { Text("Áp dụng cho nội dung tin nhắn, trích dẫn và ô soạn tin.").font(.caption).foregroundStyle(.secondary) }
    Section("Khung trò chuyện") { Toggle("Hiển thị ảnh thu nhỏ", isOn: $thumbnails) }
   case .notifications:

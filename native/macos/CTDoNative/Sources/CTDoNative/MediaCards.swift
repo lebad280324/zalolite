@@ -295,14 +295,14 @@ struct VoiceCard: View {
     }
     private var playing: Bool { playback.isPlaying(url) }
     private var progress: Double { playback.current == url ? playback.progress : 0 }
-    private var tint: Color { outgoing ? .white : .accentColor }
+    private var tint: Color { outgoing ? OutgoingBubble.current.textColor : .accentColor }
 
     var body: some View {
         HStack(spacing: 11) {
             Button { playback.toggle(url) } label: {
                 Image(systemName: playing ? "pause.fill" : "play.fill").font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(outgoing ? Color.accentColor : .white)
-                    .frame(width: 38, height: 38).background(outgoing ? Color.white : Color.accentColor, in: Circle())
+                    .foregroundStyle(outgoing ? OutgoingBubble.current.fillColor : .white)
+                    .frame(width: 38, height: 38).background(outgoing ? OutgoingBubble.current.textColor : Color.accentColor, in: Circle())
                     .replaceSymbolTransition()
             }.buttonStyle(.plain).help(playing ? "Tạm dừng" : "Phát tin nhắn thoại")
             VStack(alignment: .leading, spacing: 5) {
@@ -316,11 +316,11 @@ struct VoiceCard: View {
                     Text(durationText).font(.system(size: 11, weight: .medium)).monospacedDigit()
                     Spacer()
                     Text(time, format: .dateTime.hour().minute()).font(.system(size: 10)).monospacedDigit().opacity(0.82)
-                }.foregroundStyle(outgoing ? .white.opacity(0.85) : .secondary)
+                }.foregroundStyle(outgoing ? OutgoingBubble.current.textColor.opacity(0.85) : .secondary)
             }.frame(width: 150)
         }
         .padding(.leading, 9).padding(.trailing, 13).padding(.vertical, 9)
-        .background(outgoing ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(scheme == .dark ? Color(white: 0.17) : .white),
+        .background(outgoing ? OutgoingBubble.current.fillStyle : AnyShapeStyle(scheme == .dark ? Color(white: 0.17) : .white),
                     in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
         .animation(.linear(duration: 0.05), value: progress)

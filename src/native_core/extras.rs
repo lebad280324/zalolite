@@ -527,7 +527,7 @@ async fn thread_library(thread: Thread, db_path: String) -> Result<Value> {
         messages.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| b.id.cmp(&a.id)));
         let (mut photos, mut files, mut links) = (Vec::new(), Vec::new(), Vec::new());
         for message in &messages {
-            let dto = serde_json::to_value(super::message_dto(message))?;
+            let dto = serde_json::to_value(super::message_dto(message, ""))?;
             let has = |key: &str| dto.get(key).is_some_and(|value| !value.is_null());
             let kind = dto.get("msg_type").and_then(Value::as_str).unwrap_or_default();
             let bucket = if kind == "chat.photo" || kind == "chat.video.msg" && has("image_url") {

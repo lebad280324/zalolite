@@ -509,13 +509,13 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
     private func color(_ tone: RowTone, _ layout: MessageRowLayout) -> NSColor {
         let outgoing = layout.message.isOutgoing && !layout.bare
         switch tone {
-        case .primary: return outgoing ? .white : .labelColor
-        case .secondary: return outgoing ? NSColor.white.withAlphaComponent(0.78) : .secondaryLabelColor
-        case .accent: return outgoing ? .white : .controlAccentColor
+        case .primary: return outgoing ? OutgoingBubble.current.text : .labelColor
+        case .secondary: return outgoing ? OutgoingBubble.current.text.withAlphaComponent(0.78) : .secondaryLabelColor
+        case .accent: return outgoing ? OutgoingBubble.current.text : .controlAccentColor
         case .white: return .white
         case .pill: return NSColor.labelColor.withAlphaComponent(0.75)
         // Quieter than secondary text, still legible on either bubble.
-        case .time: return outgoing ? NSColor.white.withAlphaComponent(0.62) : NSColor.labelColor.withAlphaComponent(0.4)
+        case .time: return outgoing ? OutgoingBubble.current.text.withAlphaComponent(0.62) : NSColor.labelColor.withAlphaComponent(0.4)
         case .name:
             let key = layout.input.senderID.isEmpty ? layout.input.displayName : layout.input.senderID
             return Self.palette[Int(key.unicodeScalars.reduce(UInt32(7)) { ($0 &* 31 &+ $1.value) % 10_007 }) % Self.palette.count]
@@ -643,9 +643,10 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
             context.addPath(bubblePath(layout.bubble.offsetBy(dx: 0, dy: 1), layout.radii))
             context.setFillColor(NSColor.black.withAlphaComponent(0.07).cgColor); context.fillPath()
             context.addPath(path)
-            context.setFillColor((outgoing ? NSColor.controlAccentColor : incoming).cgColor)
+            let style = OutgoingBubble.current
+            context.setFillColor((outgoing ? style.fill : incoming).cgColor)
             context.fillPath()
-            if outgoing {
+            if outgoing && style.gradient {
                 let accent = NSColor.controlAccentColor.usingColorSpace(.deviceRGB) ?? .systemBlue
                 let top = accent.blended(withFraction: 0.16, of: .white) ?? accent
                 if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [top.cgColor, accent.cgColor] as CFArray, locations: nil) {
@@ -658,14 +659,14 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
         }
         if let quote = layout.quote {
             context.addPath(rounded(quote.rect, 7))
-            context.setFillColor((outgoing ? NSColor.white.withAlphaComponent(0.18) : NSColor.controlAccentColor.withAlphaComponent(0.08)).cgColor)
+            context.setFillColor((outgoing ? OutgoingBubble.current.text.withAlphaComponent(0.18) : NSColor.controlAccentColor.withAlphaComponent(0.08)).cgColor)
             context.fillPath()
             context.addPath(rounded(quote.bar, 1.5))
-            context.setFillColor((outgoing ? NSColor.white : NSColor.controlAccentColor).cgColor); context.fillPath()
+            context.setFillColor((outgoing ? OutgoingBubble.current.text : NSColor.controlAccentColor).cgColor); context.fillPath()
         }
         if let link = layout.link {
             context.addPath(rounded(link.bar, 1.5))
-            context.setFillColor((outgoing ? NSColor.white : NSColor.controlAccentColor).cgColor); context.fillPath()
+            context.setFillColor((outgoing ? OutgoingBubble.current.text : NSColor.controlAccentColor).cgColor); context.fillPath()
         }
         // A bare photo shrinks to the image; inside a bubble it fills its frame with no empty bands.
         let photoRect = layout.photo.map { frame in
@@ -716,7 +717,7 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
             }
         }
         if let selection, let caption = layout.caption {
-            context.setFillColor((outgoing ? NSColor.white.withAlphaComponent(0.32) : NSColor.selectedTextBackgroundColor).cgColor)
+            context.setFillColor((outgoing ? OutgoingBubble.current.text.withAlphaComponent(0.32) : NSColor.selectedTextBackgroundColor).cgColor)
             for line in caption.block.lines {
                 let shared = NSIntersectionRange(selection, line.range)
                 guard shared.length > 0 else { continue }
@@ -829,4 +830,5 @@ final class TranscriptRowView: NSTableRowView {
 @MainActor enum TranscriptPointer {
     static weak var active: NativeTranscript.Coordinator?
     static func messageID() -> String? { active?.messageUnderPointer() }
+    static func hover() -> (id: String, outgoing: Bool, rect: CGRect, bubble: Bool)? { active?.hoverUnderPointer() }
 }
