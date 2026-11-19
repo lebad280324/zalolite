@@ -1,0 +1,20 @@
+.touch-id { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 52px; align-items: center; padding-block: 80px 24px; scroll-margin-top: 32px; }
+.touch-id-shot { min-width: 0; margin: 0; }
+.touch-id-shot img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); }
+.touch-id-shot figcaption { font-size: 13px; line-height: 1.7; margin-top: 12px; color: var(--ink-soft); }
+.touch-id-label { color: var(--blue); font-size: 14px; font-weight: 600; margin: 0 0 16px; }
+.touch-id h2 { font-size: clamp(30px, 3.1vw, 43px); line-height: 1.25; }
+.touch-id-lede { font-size: 16px; line-height: 1.85; color: var(--ink-soft); margin: 20px 0; }
+.touch-id-points { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; color: var(--ink-soft); font-size: 14px; line-height: 1.85; }
+.touch-id-points li { padding-left: 18px; border-left: 2px solid var(--line); }
+.touch-id-points b { color: var(--ink); font-weight: 600; }
+.touch-feature-link { color: inherit; text-decoration: none; }
+.touch-feature-link:hover { color: var(--blue); text-decoration: underline; }
+@media (max-width: 1050px) {
+  .touch-id { grid-template-columns: 1fr; gap: 28px; }
+  .touch-id-copy { grid-row: 1; max-width: 660px; }
+}
+@media (max-width: 760px) {
+  .touch-id { padding-block: 56px 12px; }
+  .touch-id-shot img { border-radius: 12px; }
+}
