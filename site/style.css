@@ -128,6 +128,7 @@ footer { border-top: 1px solid var(--line); padding-block: 30px; font-size: 11px
 .ai-points b { color: var(--ink); font-weight: 600; }
 .ai-link { font-weight: 600; font-size: 14px; }
 .ai-shots { display: grid; gap: 22px; }
+.bubbles { padding-block: 96px 0; }
 .ai-shot { margin: 0; }
 .ai-shot img { width: 100%; border-radius: 16px; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--paper); }
 .ai-shot figcaption { margin-top: 10px; color: var(--ink-soft); font-size: 13px; }
@@ -212,3 +213,18 @@ footer { border-top: 1px solid var(--line); padding-block: 30px; font-size: 11px
   .install-box { padding: 23px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .download { transition: none; } }
+
+/* Article pages (bai-viet/) */
+.article { max-width: 760px; padding-block: 40px 96px; }
+.article h1 { font-size: clamp(32px, 5vw, 50px); font-weight: 800; letter-spacing: -.035em; line-height: 1.1; margin: 8px 0 18px; }
+.article h2 { font-size: clamp(22px, 3vw, 28px); font-weight: 700; letter-spacing: -.02em; margin: 52px 0 12px; }
+.article-meta { color: var(--ink-soft); font-size: 13px; margin: 0; }
+.article-lede { font-size: 18px; color: var(--ink-soft); margin: 0 0 32px; }
+.article p, .article li { font-size: 16px; }
+.article ul { padding-left: 22px; display: grid; gap: 8px; }
+.article figure { margin: 32px 0; }
+.article figure img { width: 100%; border-radius: 16px; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--paper); }
+.article figcaption { margin-top: 10px; color: var(--ink-soft); font-size: 13px; }
+.article code { font-size: .9em; padding: 1px 6px; border-radius: 6px; background: var(--paper); border: 1px solid var(--line); }
+.article-foot { margin-top: 40px; font-weight: 600; }
+@media (max-width: 760px) { .article { padding-block: 24px 64px; } .article-lede { font-size: 16px; } }
