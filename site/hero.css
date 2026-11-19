@@ -1,0 +1,33 @@
+/* Keep the introduction, download action and product image in one hero. */
+.hero-unified { padding-block: 44px 36px; }
+.hero-unified .hero-grid { grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr); gap: 44px; align-items: center; }
+.hero-unified .hero-copy { min-width: 0; }
+.hero-unified .hero-grid > .shot-frame { align-self: center; }
+.hero-unified .platform { font-size: 13px; margin-bottom: 22px; flex-wrap: wrap; }
+.hero-unified h1 { font-size: clamp(36px, 3.7vw, 51px); line-height: 1.17; letter-spacing: -.045em; }
+.hero-unified .lede { margin-top: 22px; font-size: 16px; line-height: 1.85; }
+.hero-unified .get { padding: 0; margin: 26px 0 0; background: transparent; border: 0; border-radius: 0; }
+.hero-unified .download { width: auto; justify-content: flex-start; padding: 14px 22px; font-size: 15px; }
+.hero-unified .download small { font-size: 12px; }
+.hero-unified .meta { flex-direction: row; justify-content: flex-start; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 14px 0; font-size: 12px; }
+.hero-unified .legacy { text-align: left; margin: 0 0 12px; font-size: 13px; }
+.hero-unified .source { display: inline-block; border: 0; padding: 0; text-align: left; font-size: 13px; }
+.hero-unified .shot-frame { min-width: 0; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; }
+.hero-unified .shot-hero { border-radius: 16px; box-shadow: var(--shadow); }
+.hero-unified .shot-frame figcaption { padding: 14px 8px 0; font-size: 12px; line-height: 1.7; }
+@media (min-width: 1440px) {
+  .hero-unified .hero-grid { gap: 48px; grid-template-columns: minmax(0, .85fr) minmax(0, 1.4fr); }
+  .hero-unified h1 { font-size: 50px; }
+}
+@media (max-width: 1000px) {
+  .hero-unified .hero-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 28px; }
+  .hero-unified h1 { font-size: clamp(34px, 4vw, 42px); }
+}
+@media (max-width: 760px) {
+  .hero-unified { padding-block: 36px 20px; }
+  .hero-unified .hero-grid { grid-template-columns: 1fr; gap: 30px; }
+  .hero-unified h1 { font-size: clamp(36px, 7.5vw, 52px); }
+  .hero-unified .platform { font-size: 12px; margin-bottom: 18px; }
+  .hero-unified .get { max-width: none; }
+  .hero-unified .shot-frame figcaption { padding-inline: 0; }
+}
