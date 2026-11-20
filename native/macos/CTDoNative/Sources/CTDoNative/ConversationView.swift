@@ -5,6 +5,8 @@ import NativeBridge
 struct ConversationView: View {
     @EnvironmentObject private var store: AppStore
     let thread: ThreadSnapshot
+    /// The composer text; observed here so typing redraws this view, not the whole window.
+    @ObservedObject var composerDraft: ComposerDraft
     /// Replaces the centred title, e.g. the chat bubble's own header with its window buttons.
     var customHeader: AnyView? = nil
     @State private var confirmRecall: MessageSnapshot?
@@ -30,7 +32,7 @@ struct ConversationView: View {
     /// Position in `store.conversationSearchHits` (0 = newest match).
     @State private var searchIndex = 0
     private var hasDraft: Bool {
-        !store.pendingAttachments.isEmpty || !store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !store.pendingAttachments.isEmpty || !composerDraft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -273,7 +275,8 @@ struct ConversationView: View {
                                        highlighted: store.highlightedMessageID == message.id, showThumbnails: showThumbnails,
                                        senderName: identity.name, senderAvatar: identity.avatar, senderID: identity.id,
                                        firstInRun: opensRun, lastInRun: row.endsRun, isGroup: thread.isGroup, album: row.album,
-                                       onQuoteJump: { store.jump(toThread: thread.id, messageID: $0) }).equatable()
+                                       onQuoteJump: { store.jump(toThread: thread.id, messageID: $0) },
+                                       resolveMention: { [weak store] in store?.mentionedMember($0) }).equatable()
                         }
                         .offset(x: swipe.messageID == message.id ? swipe.offset : 0)
                         .background(alignment: swipe.offset >= 0 ? .leading : .trailing) {
@@ -368,8 +371,28 @@ struct ConversationView: View {
 
     private var composer: some View {
         VStack(spacing:8) {
-            ComposerAssist(thread:thread).id(thread.id)
+            ComposerAssist(thread:thread, composer:store.composer).id(thread.id)
             TypingBar(tracker: store.typing, thread: thread)
+            if store.strangerBlocked.contains(thread.id) && !thread.isGroup && !store.sendBlocked.contains(thread.id) {
+                HStack(spacing:9) {
+                    Image(systemName:"person.crop.circle.badge.exclamationmark").font(.system(size:16,weight:.semibold)).foregroundStyle(.orange)
+                    VStack(alignment:.leading,spacing:1) {
+                        Text("\(thread.name) không nhận tin nhắn từ người lạ").font(.system(size:13,weight:.semibold)).lineLimit(1)
+                        Text("Bạn chưa thể gửi tin nhắn đến người này. Gửi lời mời kết bạn để trò chuyện.")
+                            .font(.system(size:11.5)).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Spacer(minLength:6)
+                    if store.supports("add_friend") {
+                        Button("Gửi kết bạn") { store.send("add_friend", parameters: ["user_id": .string(thread.id)]) }
+                            .buttonStyle(.borderedProminent).controlSize(.small).capsuleButtonShape()
+                            .disabled(store.busy.contains("add_friend"))
+                    }
+                }
+                .padding(.horizontal,12).padding(.vertical,9)
+                .nativeGlass(14)
+                .background(Color.orange.opacity(0.07),in:RoundedRectangle(cornerRadius:14,style:.continuous))
+                .transition(.move(edge:.bottom).combined(with:.opacity))
+            }
             if store.sendBlocked.contains(thread.id) || (!thread.isGroup && store.hasBlocked(thread.id)) {
                 let mine = !thread.isGroup && store.hasBlocked(thread.id)
                 HStack(spacing:9) {
@@ -419,7 +442,7 @@ struct ConversationView: View {
                     if !store.pendingAttachments.isEmpty { DraftAttachments().transition(.move(edge:.bottom).combined(with:.opacity)) }
                     HStack(alignment:.center,spacing:6) {
                         ZStack(alignment:.topLeading) {
-                            NativeComposer(text:$store.draft,enabled:store.ready && store.session.loggedIn,focusRequest:store.quote.map { _ in thread.id + ":" + String(store.replyFocusGeneration) },onSend:{store.submitComposer()},onPasteAttachments:{store.pasteAttachments()})
+                            NativeComposer(text:$composerDraft.text,enabled:store.ready && store.session.loggedIn,focusRequest:store.quote.map { _ in thread.id + ":" + String(store.replyFocusGeneration) },onSend:{store.submitComposer()},onPasteAttachments:{store.pasteAttachments()})
                         }.frame(minHeight:34)
                         Button{showingEmoji.toggle()}label:{Image(systemName:"face.smiling").font(.system(size:19)).frame(width:30,height:34)}
                             .buttonStyle(LivelyButtonStyle()).help("Biểu tượng cảm xúc (⌃⌘Space)")
@@ -548,8 +571,10 @@ struct MessageRow: View, Equatable {
     /// Every photo of a batch sent together; drawn as one grid in place of the single photo.
     var album: [MessageSnapshot] = []
     var onQuoteJump: (String) -> Void
+    /// Finds the member an @tag names. A closure, not the store: observing the store made every
+    /// SwiftUI row redraw on each keystroke in the composer.
+    var resolveMention: (String) -> FeatureRow? = { _ in nil }
     @State private var showingProfile = false
-    @EnvironmentObject private var store: AppStore
     /// The member opened by clicking an @tag in this message.
     @State private var mentioned: FeatureRow?
     static func ==(lhs: Self, rhs: Self) -> Bool {
@@ -695,7 +720,7 @@ struct MessageRow: View, Equatable {
                                 .lineSpacing(1.5).fixedSize(horizontal:false,vertical:true)
                                 .environment(\.openURL, OpenURLAction { url in
                                     guard url.scheme == MessageTypography.mentionScheme else { return .systemAction }
-                                    mentioned = store.mentionedMember(url.path)
+                                    mentioned = resolveMention(url.path)
                                     return .handled
                                 })
                                 .windowBoundedPopover(isPresented: Binding(get: { mentioned != nil }, set: { if !$0 { mentioned = nil } })) {

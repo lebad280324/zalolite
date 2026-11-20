@@ -635,14 +635,13 @@ struct ChatHeadWindow: View {
     @State private var shown = false
 
     private var thread: ThreadSnapshot? { heads.openID.flatMap { id in store.threads.first { $0.id == id } } }
-    private var messages: [MessageSnapshot] { Array((store.messages[heads.openID ?? ""] ?? []).suffix(80)) }
 
     var body: some View {
         Group {
             if let thread {
                 // The full conversation (native rows, polls, menus, composer with files and stickers),
                 // under the bubble's own header.
-                ConversationView(thread: thread, customHeader: AnyView(header(thread).padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 4)))
+                ConversationView(thread: thread, composerDraft: store.composer, customHeader: AnyView(header(thread).padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 4)))
                     .id(thread.id)
                     .background { ChatBackgroundView(thread: thread) }
             } else {
@@ -696,77 +695,6 @@ struct ChatHeadWindow: View {
         .help(help)
     }
 
-    private func transcript(_ thread: ThreadSnapshot) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    if messages.isEmpty {
-                        Text(store.busy.contains("load_message_page") || store.busy.contains("load_messages") ? "Đang tải tin nhắn…" : "Chưa có tin nhắn")
-                            .font(.callout).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity).padding(.top, 40)
-                    }
-                    ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                        row(message, previous: index > 0 ? messages[index - 1] : nil,
-                            next: index + 1 < messages.count ? messages[index + 1] : nil, thread: thread)
-                            .id(message.id)
-                    }
-                    Color.clear.frame(height: 4).id("bottom")
-                }
-                .padding(.horizontal, 10).padding(.vertical, 6)
-            }
-            .scrollIndicators(.hidden)
-            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onValueChange(of: messages.last?.id) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-            .onValueChange(of: heads.openID) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
-        }
-    }
-
-    @ViewBuilder
-    private func row(_ message: MessageSnapshot, previous: MessageSnapshot?, next: MessageSnapshot?, thread: ThreadSnapshot) -> some View {
-        if message.messageType == "chat.system" {
-            Text(verbatim: message.text).font(.caption).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 6)
-        } else {
-            let opensRun = previous == nil || previous?.senderID != message.senderID || previous?.messageType == "chat.system"
-            let endsRun = next == nil || next?.senderID != message.senderID || next?.messageType == "chat.system"
-            let identity = store.senderIdentity(message, in: thread)
-            MessageRow(message: message, showSender: thread.isGroup && !message.isOutgoing && opensRun,
-                       showAvatar: !message.isOutgoing && endsRun, reserveAvatar: !message.isOutgoing,
-                       senderName: identity.name, senderAvatar: identity.avatar, senderID: identity.id,
-                       firstInRun: opensRun, lastInRun: endsRun, isGroup: thread.isGroup,
-                       onQuoteJump: { _ in heads.openInMainWindow(thread.id) })
-                .equatable()
-                .padding(.top, opensRun ? 6 : 0)
-        }
-    }
-
-    private func composer(_ thread: ThreadSnapshot) -> some View {
-        let ready = store.canSend && store.selectedThreadID == thread.id
-        let empty = store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return HStack(alignment: .bottom, spacing: 8) {
-            NativeComposer(text: $store.draft, enabled: ready, focusRequest: heads.openID, onSend: { submit(thread) })
-                .padding(.horizontal, 8)
-                .chatHeadGlass(RoundedRectangle(cornerRadius: 19, style: .continuous))
-            Button { submit(thread) } label: {
-                Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(empty ? Color.secondary : Color.white)
-                    .frame(width: 36, height: 36)
-                    .contentShape(Circle())
-                    .chatHeadGlass(Circle(), interactive: true, tint: empty ? nil : Color.accentColor)
-            }
-            .buttonStyle(.plain)
-            .disabled(!ready || empty)
-            .help("Gửi")
-        }
-        .chatHeadGlassGroup(spacing: 8)
-    }
-
-    private func submit(_ thread: ThreadSnapshot) {
-        guard store.selectedThreadID == thread.id else { return }
-        store.submitComposer()
-    }
 }
 
 /// The newest message beside its bubble; clicking it opens the conversation.
@@ -888,6 +816,11 @@ struct ChatHeadPicker: View {
     }
 
     var body: some View {
+        // A closed picker stays in its hidden panel; it must not sort every conversation on each redraw.
+        if heads.pickerOpen { content } else { Color.clear.frame(width: ChatHeads.pickerSize.width, height: ChatHeads.pickerSize.height) }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Tin nhắn mới").font(.system(size: 16, weight: .semibold))

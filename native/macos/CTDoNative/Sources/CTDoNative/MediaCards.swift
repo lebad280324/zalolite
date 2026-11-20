@@ -349,7 +349,8 @@ struct VoiceCard: View {
 /// A video plays right in the conversation, like Messenger: a click starts it in place with
 /// inline controls; the expand button still opens the large player.
 struct VideoCard: View {
-    @EnvironmentObject private var store: AppStore
+    /// Asks open transcripts to measure their rows again, without the card observing the store.
+    static let remeasure = Notification.Name("vn.ctdo.native.transcriptRemeasure")
     /// Learnt aspects outlive the card, so a re-measured row gets the right height at once.
     @MainActor static var aspects: [URL: CGFloat] = [:]
     let url: URL
@@ -428,7 +429,7 @@ struct VideoCard: View {
                     Self.aspects[url] = value
                     aspect = value
                     // The row was measured at the default height; measure it again once.
-                    if first { store.transcript.presentationVersion += 1 }
+                    if first { NotificationCenter.default.post(name: Self.remeasure, object: nil) }
                 }
             }
         }

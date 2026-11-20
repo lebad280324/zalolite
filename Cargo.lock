@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "ctdozlite"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "aes",
  "aes-gcm",

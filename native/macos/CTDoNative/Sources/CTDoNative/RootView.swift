@@ -129,6 +129,7 @@ struct RootView: View {
         .animation(reducedMotion ? nil : .easeOut(duration: 0.25), value: store.isLocked)
         // A new reading size changes every row's height.
         .onReceive(NotificationCenter.default.publisher(for: .messageTextSizeChanged)) { _ in store.transcript.presentationVersion += 1 }
+        .onReceive(NotificationCenter.default.publisher(for: VideoCard.remeasure)) { _ in store.transcript.presentationVersion += 1 }
         .overlay(alignment: .top) { CallOverlayView().padding(.top, 58) }
     }
 
@@ -175,7 +176,7 @@ struct RootView: View {
                 if store.workspaceSection == .contacts { ContactsWorkspace() }
                 else if store.workspaceSection == .saved { SavedWorkspace() }
                 // One conversation view serves every thread: rebuilding the composer, header and table per switch is what made switching slow.
-                else if let thread = store.selectedThread { ConversationView(thread: thread) }
+                else if let thread = store.selectedThread { ConversationView(thread: thread, composerDraft: store.composer) }
                 else { welcomePanel }
             }
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)

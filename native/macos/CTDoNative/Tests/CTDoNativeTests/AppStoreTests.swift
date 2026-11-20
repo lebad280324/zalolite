@@ -250,4 +250,20 @@ final class AppStoreTests: XCTestCase {
   subscription.cancel();store.stop()
  }
 
+
+    func testTypingDoesNotRedrawTheWholeWindowPerKeystroke() async throws {
+        try await MainActor.run {
+            let store = AppStore(arguments: ["test", "--demo"]); defer { store.stop() }
+            var storeChanges = 0, composerChanges = 0
+            let a = store.objectWillChange.sink { _ in storeChanges += 1 }
+            let b = store.composer.objectWillChange.sink { _ in composerChanges += 1 }
+            for text in ["x", "xi", "xin", "xin ", "xin c"] { store.draft = text }
+            XCTAssertEqual(composerChanges, 5)
+            XCTAssertEqual(storeChanges, 0, "each keystroke must not invalidate every view observing the store")
+            XCTAssertEqual(store.draft, "xin c")
+            _ = (a, b)
+        }
+        // The conversation list catches up once typing pauses.
+        try await Task.sleep(nanoseconds: 900_000_000)
+    }
 }

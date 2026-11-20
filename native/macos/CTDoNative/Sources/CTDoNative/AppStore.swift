@@ -67,7 +67,13 @@ final class AppStore: ObservableObject {
     @Published var conversationSearch = ""
     @Published var showingContactLookup = false
     @Published var contactResult: JSONValue?
-    @Published var draft = ""
+    /// The text being composed lives in its own object: as a published property here, every
+    /// keystroke made the whole window (conversation list, toolbar, rows) evaluate again.
+    let composer = ComposerDraft()
+    var draft: String {
+        get { composer.text }
+        set { composer.text = newValue }
+    }
     private(set) var replyFocusGeneration: UInt = 0
     @Published var quote: MessageSnapshot? {
         didSet { if quote != nil { replyFocusGeneration &+= 1 } }
@@ -113,6 +119,10 @@ final class AppStore: ObservableObject {
     @Published var aliasThread: ThreadSnapshot?
     /// Must match `SEND_BLOCKED_MESSAGE` in the Rust worker.
     static let sendBlockedMessage = "Không gửi được tin nhắn: người này đã chặn bạn hoặc không nhận tin nhắn từ bạn."
+    /// Zalo error 122, in Zalo's words: the person takes no messages from strangers.
+    static let strangerBlockedMessage = "Bạn chưa thể gửi tin nhắn đến người này vì người này chặn không nhận tin nhắn từ người lạ."
+    /// Conversations whose person takes no messages from strangers (Zalo error 122).
+    @Published var strangerBlocked: Set<String> = []
     /// Corner radius of this window, so inner cards stay concentric with it.
     @Published var windowCornerRadius: CGFloat = 26
     /// Reopens the main window scene after it was closed; set by the first window.
@@ -123,6 +133,8 @@ final class AppStore: ObservableObject {
     var pendingPreviews: [String: String] = [:]
     var pendingSaves: [String: String] = [:]
     @Published var fileDownloadsVersion = 0
+    /// Last listing of the accounts on this Mac (see `savedAccounts`).
+    var savedAccountsCache: (at: Date, accounts: [SavedAccount])?
     /// The account being switched to, shown instead of the sign-in screen while the worker restarts.
     @Published var switchingTo: SavedAccount?
     /// Unread counts the core checked for the other saved accounts, by UIN.
@@ -181,6 +193,7 @@ final class AppStore: ObservableObject {
         } else if let path = UserDefaults.standard.string(forKey: "nativeDataDirectory") {
             dataDirectory = URL(fileURLWithPath: path, isDirectory: true)
         } else { dataDirectory = base }
+        composer.owner = self
     }
 
     var selectedThread: ThreadSnapshot? { threads.first { $0.id == selectedThreadID } }
@@ -291,7 +304,7 @@ final class AppStore: ObservableObject {
         drafts.removeAll(); historyLimits.removeAll(); historyCursors.removeAll(); historyHasMore.removeAll(); historyHasNewer.removeAll(); removedMessageIDs.removeAll(); pageRequests.removeAll(); messageCacheOrder.removeAll(); lastHistoryRefresh.removeAll(); transcript.reset()
         resetExtras()
         connection = "Đang mở ứng dụng…"; error = nil
-        profiles = [:]; threadLibraries = [:]; typing.reset(); sendBlocked = []; aliases = [:]; originalNames = [:]; aliasesRequested = false
+        profiles = [:]; threadLibraries = [:]; typing.reset(); sendBlocked = []; strangerBlocked = []; aliases = [:]; originalNames = [:]; aliasesRequested = false
         let launch: @Sendable () -> Void = { [weak self] in
             Task { @MainActor [weak self] in
                 if let prepare { await Task.detached(priority: .userInitiated) { prepare() }.value }
@@ -575,6 +588,7 @@ final class AppStore: ObservableObject {
                 let next = try event.data?.decode(SessionSnapshot.self) ?? SessionSnapshot()
                 // The worker answered for the account switched to: signed in, or asking for a QR code.
                 switchingTo = nil
+                savedAccountsCache = nil
                 if !next.loggedIn || next.uin != session.uin {
                     cancelTimeouts(); pending.removeAll(); busy.removeAll()
                     drafts.removeAll(); historyLimits.removeAll(); historyCursors.removeAll(); historyHasMore.removeAll(); historyHasNewer.removeAll(); removedMessageIDs.removeAll(); pageRequests.removeAll(); messageCacheOrder.removeAll(); lastHistoryRefresh.removeAll(); transcript.reset()
@@ -712,6 +726,10 @@ final class AppStore: ObservableObject {
                 // Shown as a bar above this conversation's composer instead of a generic banner.
                 sendBlocked.insert(threadID); return
             }
+            if event.error == Self.strangerBlockedMessage, let threadID = action.threadID {
+                // Zalo shows this as a reply in the conversation; here it is the bar, with a friend request.
+                strangerBlocked.insert(threadID); return
+            }
             // Background reads for optional panels (group pins, media library) never raise a banner.
             if ["list_pinned_topics", "thread_library", "get_profile", "get_group_members", "select_thread", "list_blocked_contacts", "full_avatar"].contains(action.command) { return }
             // A late read failure must not cover a different conversation with an obsolete error.
@@ -720,7 +738,7 @@ final class AppStore: ObservableObject {
             return
         }
         if ["send_message", "send_quote", "send_attachment", "send_sticker", "send_contact"].contains(action.command), let threadID = action.threadID {
-            sendBlocked.remove(threadID)
+            sendBlocked.remove(threadID); strangerBlocked.remove(threadID)
         }
         handleBAResult(command: action.command, data: event.data, threadID: action.threadID, requestID: id)
         handleAdditionsResult(command: action.command, data: event.data, threadID: action.threadID, requestID: id)
@@ -821,5 +839,27 @@ final class AppStore: ObservableObject {
             return false
         }
         return true
+    }
+}
+
+
+/// Text in the composer. Only the conversation's composer and its suggestions observe it; the
+/// conversation list catches up once typing pauses, for the draft line under the open chat.
+@MainActor
+final class ComposerDraft: ObservableObject {
+    @Published var text = "" {
+        didSet { if text != oldValue { scheduleListRefresh() } }
+    }
+    /// The store to nudge after a pause, so the list's draft preview follows without per-key redraws.
+    weak var owner: AppStore?
+    private var pause: Task<Void, Never>?
+
+    private func scheduleListRefresh() {
+        pause?.cancel()
+        pause = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            self?.owner?.objectWillChange.send()
+        }
     }
 }

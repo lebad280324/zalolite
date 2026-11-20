@@ -79,7 +79,15 @@ enum AccountFiles {
 }
 
 extension AppStore {
-    var savedAccounts: [SavedAccount] { demo ? [] : AccountFiles.list(dataDirectory) }
+    /// Accounts on this Mac. Listing reads every saved session file, and views ask on each redraw
+    /// (every keystroke), so the list is kept for a few seconds and dropped when accounts change.
+    var savedAccounts: [SavedAccount] {
+        if demo { return [] }
+        if let cached = savedAccountsCache, Date().timeIntervalSince(cached.at) < 5 { return cached.accounts }
+        let accounts = AccountFiles.list(dataDirectory)
+        savedAccountsCache = (Date(), accounts)
+        return accounts
+    }
 
     /// Keeps the current session and opens the QR sign-in for another account. The current account is
     /// not signed out on Zalo, so switching back needs no new QR scan.
@@ -114,6 +122,7 @@ extension AppStore {
     func forgetAccount(_ uin: String) {
         guard AccountFiles.isAccountID(uin), uin != session.uin else { return }
         try? FileManager.default.removeItem(at: AccountFiles.saved(dataDirectory, uin))
+        savedAccountsCache = nil
         objectWillChange.send()
     }
 }

@@ -216,6 +216,11 @@ enum Command {
     GetProfile {
         user_id: String,
     },
+    /// The original profile photo behind an avatar (re-notes/67). It had no entry here, so every
+    /// request failed to decode and the viewer kept the 160 px avatar.
+    FullAvatar {
+        user_id: String,
+    },
     AddFriend {
         user_id: String,
         #[serde(default)]
@@ -348,6 +353,7 @@ impl Command {
             Self::LookupPhone { .. } => "lookup_phone",
             Self::CheckFriend { .. } => "check_friend",
             Self::GetProfile { .. } => "get_profile",
+            Self::FullAvatar { .. } => "full_avatar",
             Self::ThreadLibrary { .. } => "thread_library",
             Self::AddFriend { .. } => "add_friend",
             Self::AcceptFriend { .. } => "accept_friend",
@@ -801,6 +807,10 @@ impl std::error::Error for UserError {}
 /// Shown when Zalo refuses delivery to a person; the native UI matches this text to show its bar.
 const SEND_BLOCKED_MESSAGE: &str =
     "Không gửi được tin nhắn: người này đã chặn bạn hoặc không nhận tin nhắn từ bạn.";
+/// Zalo's own wording for error 122: the person does not take messages from strangers. The native
+/// UI matches this text too and offers a friend request.
+const SEND_STRANGER_BLOCKED_MESSAGE: &str =
+    "Bạn chưa thể gửi tin nhắn đến người này vì người này chặn không nhận tin nhắn từ người lạ.";
 
 fn safe_error(error: &anyhow::Error) -> String {
     if let Some(error) = error.downcast_ref::<UserError>() {
@@ -817,6 +827,14 @@ fn safe_error(error: &anyhow::Error) -> String {
         .any(|server| server.code == 119)
     {
         return SEND_BLOCKED_MESSAGE.into();
+    }
+    // 122: "chặn không nhận tin nhắn từ người lạ" (seen live on a send to a stranger, 2026-11-19).
+    if error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<crate::session::SessionError>())
+        .any(|server| server.code == 122)
+    {
+        return SEND_STRANGER_BLOCKED_MESSAGE.into();
     }
     // Underlying protocol errors may embed a raw response or a credential-bearing URL.
     "Không thực hiện được thao tác. Kiểm tra kết nối rồi thử lại.".into()
@@ -2738,6 +2756,19 @@ async fn export_key_opens(path: &str, key: &str, own_uid: &str) -> Result<bool> 
 #[cfg(test)]
 mod tests {
     #[test]
+    fn every_extra_command_decodes_as_a_request() {
+        // A command advertised to the UI but missing from `Command` fails before reaching its handler.
+        for name in extras::commands() {
+            let parsed: Result<Command, _> = serde_json::from_value(json!({"command": name}));
+            if let Err(error) = &parsed {
+                assert!(error.to_string().contains("missing field"), "{name} is not a known command: {error}");
+            }
+        }
+        let full: Command = serde_json::from_value(json!({"command": "full_avatar", "user_id": "123"})).unwrap();
+        assert_eq!(full.name(), "full_avatar");
+    }
+
+    #[test]
     fn own_reaction_under_zero_and_uin_counts_once() {
         let mut message = ChatMessage { id: "m".into(), ..Default::default() };
         message.reaction_summaries = crate::reactions::parse_reactions(&json!({"reactions": {"0": {"5": 1}, "peer": {"5": 1}}}));
@@ -2911,6 +2942,8 @@ mod tests {
     fn blocked_send_is_reported_plainly() {
         let error = anyhow::Error::from(crate::session::SessionError::new(119, "x"));
         assert_eq!(safe_error(&error), SEND_BLOCKED_MESSAGE);
+        let stranger: anyhow::Error = SessionError::new(122, "server text").into();
+        assert_eq!(safe_error(&stranger), SEND_STRANGER_BLOCKED_MESSAGE);
         let other = anyhow::Error::from(crate::session::SessionError::new(114, "x"));
         assert_ne!(safe_error(&other), SEND_BLOCKED_MESSAGE);
     }

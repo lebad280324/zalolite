@@ -836,11 +836,15 @@ final class TranscriptRowView: NSTableRowView {
     /// The transcript in the window under the pointer, so a right click or swipe reaches the
     /// conversation it was made over rather than the one that laid out last.
     private static var underPointer: NativeTranscript.Coordinator? {
+        // Asked on every scroll event: only a real overlap is resolved with the window server.
         let mouse = NSEvent.mouseLocation
-        return all.allObjects.first { coordinator in
+        let candidates = all.allObjects.filter { coordinator in
             guard let window = coordinator.window, window.isVisible else { return false }
-            return window.frame.contains(mouse) && NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0) == window.windowNumber
-        } ?? active
+            return window.frame.contains(mouse)
+        }
+        if candidates.count <= 1 { return candidates.first ?? active }
+        let front = NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0)
+        return candidates.first { $0.window?.windowNumber == front } ?? candidates.first
     }
     static func messageID() -> String? { underPointer?.messageUnderPointer() }
 }

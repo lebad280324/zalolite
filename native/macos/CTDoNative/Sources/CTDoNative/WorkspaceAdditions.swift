@@ -509,6 +509,8 @@ struct HistorySearchView: View {
 struct ComposerAssist: View {
     @EnvironmentObject private var store: AppStore
     let thread: ThreadSnapshot
+    /// Suggestions follow what is typed.
+    @ObservedObject var composer: ComposerDraft
     var body: some View {
         let replies = store.quickReplyCandidates()
         let members = store.mentionCandidates(for: thread)
@@ -562,11 +564,11 @@ struct ComposerAssist: View {
             }
         }
         .padding(.horizontal,18).padding(.top,replies.isEmpty && members.isEmpty && store.suggestedStickers.isEmpty ? 0 : 10)
-        .task(id: store.draft) {
+        .task(id: composer.text) {
             do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return }
             store.requestStickerSuggestions()
         }
-        .onValueChange(of: store.draft) { _, _ in store.loadMentionMembersIfNeeded(for: thread) }
+        .onValueChange(of: composer.text) { _, _ in store.loadMentionMembersIfNeeded(for: thread) }
     }
 }
 
