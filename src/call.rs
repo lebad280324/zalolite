@@ -947,6 +947,16 @@ impl CtrlPollState {
 /// Control events carry their media handshake as a JSON **string** inside `data.params`
 /// (`sessId`, `rtpIP`, `codec`, `extendData`, ...). Return it parsed for callers that need
 /// to answer an invite.
+/// Whether a 1:1 `request` push is a real invite to this device. Real invites name this
+/// account as `uidTo` and carry the caller's call config; pushes about a call this account
+/// placed or answered elsewhere carry neither (re-notes/80).
+pub fn is_call_invite(data: &Value) -> bool {
+    let has_callee = data
+        .get("uidTo")
+        .is_some_and(|v| !v.is_null() && v.as_str() != Some(""));
+    has_callee || event_media_params(data).get("zrtc_config").is_some()
+}
+
 pub fn event_media_params(data: &Value) -> Value {
     let Some(raw) = data.get("params").and_then(Value::as_str) else {
         return Value::Null;
@@ -2215,7 +2225,6 @@ impl CallBridge {
     ) -> Self {
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<CallEngineCmd>();
         let active_call: Arc<Mutex<Option<PureRustCallState>>> = Arc::new(Mutex::new(None));
-        let cmd_tx_inner = cmd_tx.clone();
         let task_owner = Arc::new(CallTaskOwner::default());
 
         spawn_owned_call(task_owner.clone(), { let task_owner = task_owner.clone(); async move { let _ = &task_owner;
@@ -3310,59 +3319,10 @@ impl CallBridge {
                                     .unwrap_or(0);
                                 let mut guard = active_call.lock().await;
                                 if guard.is_none() {
-                                    let self_uin = s_snap
-                                        .login
-                                        .as_ref()
-                                        .map(|l| l.uin.clone())
-                                        .unwrap_or_default();
-                                    let self_uid32 = s_snap
-                                        .zpw_sek
-                                        .as_deref()
-                                        .and_then(|sek| sek.split('.').nth(1))
-                                        .unwrap_or("");
-                                    let uid_n =
-                                        data.get("uidN").and_then(Value::as_str).unwrap_or("");
-                                    let uid_from = data
-                                        .get("uidFrom")
-                                        .and_then(|v| match v {
-                                            Value::String(s) => Some(s.to_string()),
-                                            Value::Number(n) => Some(n.to_string()),
-                                            _ => None,
-                                        })
-                                        .unwrap_or_default();
-                                    let is_from_peer = (!uid_n.is_empty() && uid_n != self_uin)
-                                        || (!uid_from.is_empty() && uid_from != self_uid32);
-                                    let media_p = event_media_params(&data);
-                                    let has_invite_media = !media_p
-                                        .get("sessId")
-                                        .and_then(Value::as_str)
-                                        .unwrap_or("")
-                                        .is_empty()
-                                        || !media_p
-                                            .get("extendData")
-                                            .and_then(Value::as_str)
-                                            .unwrap_or("")
-                                            .is_empty();
-                                    if ev_call_id != 0
-                                        && is_from_peer
-                                        && (status == 5
-                                            || (matches!(status, 0 | 3) && has_invite_media))
-                                    {
-                                        drop(guard);
-                                        let mut synth = voip_ctrl.clone();
-                                        if let Some(obj) = synth.as_object_mut() {
-                                            obj.insert(
-                                                "act".into(),
-                                                json!(if act == "group_answer" {
-                                                    "group_request"
-                                                } else {
-                                                    "request"
-                                                }),
-                                            );
-                                        }
-                                        let _ =
-                                            cmd_tx_inner.send(CallEngineCmd::ControlEvent(synth));
-                                    }
+                                    // Nothing rings here, so this `answer` belongs to a call this account
+                                    // holds on another device (e.g. dialled from the phone). It is never an
+                                    // invite: real invites always arrive as `request` (re-notes/80).
+                                    trace_line("EVT", format!("answer for call {ev_call_id} handled on another device"));
                                     continue;
                                 }
                                 let Some(st_check) = guard.as_ref() else {
@@ -3377,36 +3337,22 @@ impl CallBridge {
                                 if !is_primary_leg && extra_leg_idx.is_none() {
                                     continue;
                                 }
-                                // Ringing here and the callee's `answer` carries our own UIN: this
-                                // account picked the call up on another device. A local accept sets
-                                // `is_connected` first, so its echo never reaches this branch.
+                                // Ringing here and an `answer` arrives for this call: another device of this
+                                // account answered (or declined) it. The `answer` carries the caller's ids,
+                                // not ours, so ids cannot tell it apart (re-notes/80). A local accept sets
+                                // `is_connected` before sending its own answer, so its echo never gets here.
                                 if is_primary_leg && !st_check.is_caller && !st_check.is_connected {
-                                    let self_uin = s_snap
-                                        .login
-                                        .as_ref()
-                                        .map(|l| l.uin.clone())
-                                        .unwrap_or_default();
-                                    let uid_n = data
-                                        .get("uidN")
-                                        .and_then(|v| match v {
-                                            Value::String(s) => Some(s.clone()),
-                                            Value::Number(n) => Some(n.to_string()),
-                                            _ => None,
-                                        })
-                                        .unwrap_or_default();
-                                    if !self_uin.is_empty() && uid_n == self_uin {
-                                        *guard = None;
-                                        drop(guard);
-                                        let _ = gui_tx.send(GuiEvent::CallStateChanged(
-                                            "answered_elsewhere".into(),
-                                        ));
-                                        let _ = gui_tx.send(GuiEvent::CallStateChanged("free".into()));
-                                        let _ = gui_tx.send(GuiEvent::StatusUpdate(
-                                            "Cuộc gọi đã được trả lời trên thiết bị khác".into(),
-                                        ));
-                                        egui_ctx.request_repaint();
-                                        continue;
-                                    }
+                                    *guard = None;
+                                    drop(guard);
+                                    let _ = gui_tx.send(GuiEvent::CallStateChanged(
+                                        "answered_elsewhere".into(),
+                                    ));
+                                    let _ = gui_tx.send(GuiEvent::CallStateChanged("free".into()));
+                                    let _ = gui_tx.send(GuiEvent::StatusUpdate(
+                                        "Cuộc gọi đã được trả lời trên thiết bị khác".into(),
+                                    ));
+                                    egui_ctx.request_repaint();
+                                    continue;
                                 }
                                 if is_primary_leg && st_check.is_connected {
                                     if st_check.is_group {
@@ -3899,6 +3845,10 @@ impl CallBridge {
                                 egui_ctx.request_repaint();
                             }
                             "request" | "group_request" => {
+                                if act == "request" && !is_call_invite(&data) {
+                                    trace_line("EVT", format!("request {ev_call_id} is not an invite; ignored"));
+                                    continue;
+                                }
                                 // Skip if already handling this call with a full extendData
                                 let mut is_upgrade = false;
                                 {
@@ -4221,6 +4171,24 @@ impl CallBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_real_invites_ring() {
+        // Shapes from call_trace.log with ids and addresses replaced.
+        let invite = json!({
+            "callId": "100", "status": "0", "uidFrom": "1", "uidN": "11", "uidTo": "2",
+            "session": "s", "rtpAddress": "a:1",
+            "params": "{\"Dname\":\"x\",\"sessId\":\"s\",\"zrtc_config\":{\"callType\":1}}"
+        });
+        assert!(is_call_invite(&invite));
+        // The `answer` of a call placed from the phone, as it reaches this Mac.
+        let elsewhere = json!({
+            "callId": "100", "status": "0", "uidFrom": "1", "uidN": "11",
+            "params": "{\"sessId\":\"s\",\"extendData\":\"{}\",\"reveiverId\":\"2\",\"status\":0}"
+        });
+        assert!(!is_call_invite(&elsewhere));
+        assert!(!is_call_invite(&json!({"callId": "100", "uidTo": ""})));
+    }
 
     #[tokio::test]
     async fn call_owner_cancels_inflight_child_tasks() {

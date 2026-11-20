@@ -19,6 +19,7 @@ use crate::session::{Session, SessionError, SessionStatus};
 use crate::store::{self, MessageStore};
 
 mod account_settings;
+mod auto_reply;
 mod account_watch;
 mod client_preferences;
 mod extras;
@@ -268,6 +269,7 @@ enum NativeIntent {
     Client(ClientCommand),
     Settings(account_settings::SettingsCommand),
     Platform(platform::PlatformCommand),
+    AutoReply(auto_reply::AutoReplyCommand),
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
@@ -291,6 +293,7 @@ impl NativeIntent {
             Self::Client(ClientCommand::SetPrivacyGuard { .. }) => "set_privacy_guard",
             Self::Settings(command) => command.name(),
             Self::Platform(command) => command.name(),
+            Self::AutoReply(command) => command.name(),
         }
     }
     fn is_base(&self, predicate: impl FnOnce(&Command) -> bool) -> bool {
@@ -982,6 +985,7 @@ struct Core {
     account_settings: account_settings::SettingsState,
     platform: platform::PlatformState,
     platform_updates: Option<mpsc::UnboundedReceiver<platform::PlatformUpdate>>,
+    keyword_replies: auto_reply::KeywordState,
 }
 
 struct PollResult {
@@ -1032,6 +1036,7 @@ impl Core {
             account_settings: Default::default(),
             platform,
             platform_updates: Some(updates),
+            keyword_replies: Default::default(),
         })
     }
 
@@ -1393,22 +1398,39 @@ impl Core {
     /// Sessions signed in before poll support never kept the `group_poll` host; the account's
     /// service map from `getLoginInfo` names it. Only that host is taken from the reply.
     async fn ensure_poll_host(&mut self) -> Result<()> {
-        if !self.session.domains.group_poll.is_empty() {
+        self.ensure_service_host("group_poll").await
+    }
+
+    /// Fill a service-map host that older sessions never kept (`group_poll`, `auto_reply`) from a
+    /// fresh `getLoginInfo`, and save it with the session.
+    async fn ensure_service_host(&mut self, key: &str) -> Result<()> {
+        let slot = |domains: &crate::session::Domains| match key {
+            "auto_reply" => domains.auto_reply.clone(),
+            _ => domains.group_poll.clone(),
+        };
+        if !slot(&self.session.domains).is_empty() {
             return Ok(());
         }
         let info = crate::login::get_login_info(&self.session).await?;
         let data = info.get("data").unwrap_or(&info);
         let map = data.get("zpw_service_map_v3").or_else(|| data.get("zpw_service_map_new"));
         let host = map
-            .and_then(|map| map.get("group_poll"))
+            .and_then(|map| map.get(key))
             .and_then(|hosts| hosts.as_array().and_then(|list| list.first()).or(Some(hosts)))
             .and_then(Value::as_str)
             .filter(|host| host.starts_with("https://"))
             .map(|host| host.trim_end_matches('/').to_owned());
         let Some(host) = host else {
-            bail!(UserError("Zalo chưa cung cấp máy chủ bình chọn cho phiên này. Hãy đăng nhập lại."));
+            bail!(UserError(if key == "auto_reply" {
+                "Zalo chưa cung cấp máy chủ trả lời tự động cho phiên này. Hãy đăng nhập lại."
+            } else {
+                "Zalo chưa cung cấp máy chủ bình chọn cho phiên này. Hãy đăng nhập lại."
+            }));
         };
-        self.session.domains.group_poll = host;
+        match key {
+            "auto_reply" => self.session.domains.auto_reply = host,
+            _ => self.session.domains.group_poll = host,
+        }
         let session = self.session.clone();
         tokio::task::spawn_blocking(move || session.save_to_file("session.json")).await??;
         Ok(())
@@ -1694,6 +1716,13 @@ impl Core {
                 self.account_settings
                     .execute(command, &self.session, self.demo)
                     .await
+            }
+            NativeIntent::AutoReply(command) => {
+                self.require_login()?;
+                if command.uses_server() && !self.demo {
+                    self.ensure_service_host(auto_reply::SERVICE).await?;
+                }
+                auto_reply::execute(command, &self.session, &self.db_path, self.demo, &mut self.keyword_replies).await
             }
         }
     }
@@ -2164,10 +2193,71 @@ impl Core {
             self.output.clone(),
             self.demo,
         );
+        let before = self.keyword_snapshot();
         let removed = chat::merge_live_previews(&mut self.threads, &response);
         self.forget_removed(removed).await?;
+        self.keyword_auto_reply(before).await?;
         self.persist_best_effort().await?;
         self.publish().await
+    }
+
+    /// Message IDs before a live merge, only when keyword replies are on (re-notes/79).
+    fn keyword_snapshot(&mut self) -> Option<HashMap<String, HashSet<String>>> {
+        self.keyword_replies
+            .active(&self.db_path, self.demo || !self.logged_in())
+            .then(|| auto_reply::snapshot(&self.threads))
+    }
+
+    /// Send keyword replies for messages the last live merge added.
+    async fn keyword_auto_reply(&mut self, before: Option<HashMap<String, HashSet<String>>>) -> Result<()> {
+        let Some(before) = before else { return Ok(()) };
+        let now = crate::login::unix_now() * 1000;
+        let incoming = auto_reply::fresh_incoming(&before, &self.threads, now);
+        if incoming.is_empty() {
+            return Ok(());
+        }
+        let replies = auto_reply::plan_replies(&mut self.keyword_replies, &self.db_path, &incoming, now);
+        for (thread_id, is_group, text) in replies {
+            let client_id = chat::next_client_message_id();
+            let send = async {
+                if is_group {
+                    chat::send_group_message_with_client_id(&self.session, &thread_id, &text, client_id).await
+                } else {
+                    chat::send_message_with_client_id(&self.session, &thread_id, &text, client_id).await
+                }
+            };
+            let response = tokio::time::timeout(Duration::from_secs(10), send).await;
+            let sent = match &response {
+                Ok(Ok(response)) => check_response(response).is_ok(),
+                _ => false,
+            };
+            if !sent {
+                emit(&self.output, event("status", json!({"message": "Không gửi được một tin trả lời tự động theo từ khóa."}))).await?;
+                continue;
+            }
+            let message_id = response.ok().and_then(Result::ok).and_then(|response| {
+                response.get("data").and_then(|data| data.get("msgId")).and_then(|id| match id {
+                    Value::String(value) => Some(value.clone()),
+                    Value::Number(value) => Some(value.to_string()),
+                    _ => None,
+                })
+            }).filter(|id| !id.is_empty()).unwrap_or_else(|| format!("out_{client_id}"));
+            let message = ChatMessage {
+                kind: crate::message_model::MessageKind::Text,
+                id: message_id,
+                client_message_id: client_id.to_string(),
+                sender: "Tôi".into(),
+                text,
+                ts: crate::login::unix_now() * 1000,
+                time: crate::ui::clock(),
+                is_outgoing: true,
+                ..Default::default()
+            };
+            if let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == thread_id) {
+                chat::merge_sent_message(thread, message);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -2412,6 +2502,7 @@ pub async fn run_stdio(demo: bool) -> Result<()> {
         .chain(features::commands())
         .chain(platform::commands())
         .chain(account_settings::commands())
+        .chain(auto_reply::commands())
         .chain(["get_privacy_guard", "set_privacy_guard", "cancel_import"].iter())
         .copied()
         .collect();
@@ -2630,8 +2721,10 @@ pub async fn run_stdio(demo: bool) -> Result<()> {
                             core.publish().await?;
                         }
                         if ws_event.is_chat_ish() {
+                            let before = core.keyword_snapshot();
                             let removed = chat::merge_live_previews(&mut core.threads, &ws_event.payload);
                             core.forget_removed(removed).await?;
+                            core.keyword_auto_reply(before).await?;
                             core.publish().await?;
                             live_unsaved = true;
                         }

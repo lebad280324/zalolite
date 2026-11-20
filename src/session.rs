@@ -127,6 +127,10 @@ pub struct Domains {
     /// Only the login service map names it; empty until one is applied.
     #[serde(default)]
     pub group_poll: String,
+    /// `zpw_service_map_v3.auto_reply[0]` — `/api/autoreply/*` (Zalo PC `getAutoReplyDomain`,
+    /// re-notes/79). Only the login service map names it; empty until one is applied.
+    #[serde(default)]
+    pub auto_reply: String,
     /// `zpw_ws[...]` — control websocket endpoints (`wss://wsN-msg.chat.zalo.me`).
     ///
     /// [O] The server hands back full `wss://` URLs in the login config; the client never
@@ -196,6 +200,7 @@ impl Default for Domains {
             voice_call: default_voice_call(),
             sticker: default_sticker(),
             group_poll: String::new(),
+            auto_reply: String::new(),
             ws: default_ws(),
             service_map_candidates: std::collections::BTreeMap::new(),
             saved_candidates: std::collections::BTreeMap::new(),
@@ -292,6 +297,7 @@ impl Domains {
             ("voice_call", &mut self.voice_call),
             ("sticker", &mut self.sticker),
             ("group_poll", &mut self.group_poll),
+            ("auto_reply", &mut self.auto_reply),
         ] {
             let urls = map.get(key).map(all_urls).unwrap_or_default();
             if !urls.is_empty() {
@@ -325,6 +331,7 @@ impl Domains {
             "voice_call" => &self.voice_call,
             "sticker" => &self.sticker,
             "group_poll" => &self.group_poll,
+            "auto_reply" => &self.auto_reply,
             "auth" => &self.auth,
             "wpa_chat" => &self.wpa_chat,
             _ => "",

@@ -798,15 +798,15 @@ pub(super) async fn execute(
                 ));
             }
             let index = thread_index(threads, thread_id, Some(*is_group))?;
-            let client_id = threads[index]
-                .messages
-                .last()
-                .map(|message| message.client_message_id.as_str())
-                .unwrap_or_default();
             if !demo {
-                super::check_response(
-                    &chat::delete_conversation(session, thread_id, *is_group, client_id).await?,
-                )?;
+                // Zalo PC names the newest server message and syncs only when it has one;
+                // otherwise the history is cleared on this Mac alone (re-notes/78).
+                let own_uid = session.login.as_ref().map(|login| login.uin.as_str()).unwrap_or_default();
+                if let Some(conver) = chat::delete_conversation_anchor(&threads[index].messages, thread_id, *is_group, own_uid) {
+                    super::check_response(
+                        &chat::delete_conversation(session, thread_id, *is_group, &conver).await?,
+                    )?;
+                }
                 let path = db_path.to_owned();
                 let id = thread_id.clone();
                 tokio::task::spawn_blocking(move || MessageStore::open(&path)?.delete_thread(&id))

@@ -4,11 +4,11 @@ import UniformTypeIdentifiers
 import NativeBridge
 
 private enum SettingsPage: String, CaseIterable, Identifiable {
- case general = "Chung", updates = "Cập nhật phần mềm", security = "Tài khoản & khóa", privacy = "Quyền riêng tư", sync = "Đồng bộ & sao lưu", storage = "Dung lượng", appearance = "Giao diện", notifications = "Thông báo", messages = "Tin nhắn", calls = "Cuộc gọi", utilities = "Tiện ích", ai = "Trợ lý AI"
+ case general = "Chung", updates = "Cập nhật phần mềm", security = "Tài khoản & khóa", privacy = "Quyền riêng tư", sync = "Đồng bộ & sao lưu", storage = "Dung lượng", appearance = "Giao diện", notifications = "Thông báo", messages = "Tin nhắn", automation = "Tự động trả lời", calls = "Cuộc gọi", utilities = "Tiện ích", ai = "Trợ lý AI"
  var id: String { rawValue }
  /// Stable key used by deep links from the workspace.
  var key: String {
-  switch self { case .general: return "general"; case .updates: return "updates"; case .security: return "security"; case .privacy: return "privacy"; case .sync: return "sync"; case .storage: return "storage"; case .appearance: return "appearance"; case .notifications: return "notifications"; case .messages: return "messages"; case .calls: return "calls"; case .utilities: return "utilities"; case .ai: return "ai" }
+  switch self { case .general: return "general"; case .updates: return "updates"; case .security: return "security"; case .privacy: return "privacy"; case .sync: return "sync"; case .storage: return "storage"; case .appearance: return "appearance"; case .notifications: return "notifications"; case .messages: return "messages"; case .automation: return "automation"; case .calls: return "calls"; case .utilities: return "utilities"; case .ai: return "ai" }
  }
  /// Individual options on the page, so search finds a setting and not only a page title.
  var keywords: [String] {
@@ -24,6 +24,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
                             "Màu bong bóng", "Bong bóng tin nhắn", "Màu tin nhắn", "Xanh dịu", "Chói"]
   case .notifications: return ["Quyền thông báo", "Âm thanh", "Xem trước nội dung", "Huy hiệu Dock", "Cuộc gọi đến"]
   case .messages: return ["Tin nhắn nhanh", "Mẫu tin", "Ưu tiên và Khác", "Thư mục lưu tệp", "Nhấp đúp để trả lời", "Return để gửi", "Tải trước media", "Dán Excel", "Ảnh thu nhỏ"]
+  case .automation: return ["Trả lời tự động", "Tự động trả lời", "Trả lời theo từ khóa", "Từ khóa", "Hẹn giờ gửi", "Tin nhắn hẹn giờ", "Gửi tự động", "Zalo Business", "Đang bận"]
   case .calls: return ["Micrô", "Camera", "Loa", "Thông báo cuộc gọi đến", "Quyền thiết bị"]
   case .utilities: return ["Chụp màn hình", "Gợi ý nhãn dán", "Gợi ý @", "Nhắc tên", "Emoji", "GIF"]
   case .ai: return ["Trợ lý AI", "Codex", "Claude", "MCP", "Chia sẻ hội thoại", "Tổng hợp công việc"]
@@ -40,7 +41,7 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   switch self {
   case .general: return .gray; case .updates: return .blue; case .security: return .blue; case .privacy: return .indigo; case .sync: return .green
   case .storage: return Color(red: 0.45, green: 0.47, blue: 0.52); case .appearance: return .purple; case .notifications: return .red
-  case .messages: return Color(red: 0.2, green: 0.78, blue: 0.35); case .calls: return .teal; case .utilities: return .orange; case .ai: return .pink
+  case .messages: return Color(red: 0.2, green: 0.78, blue: 0.35); case .automation: return .cyan; case .calls: return .teal; case .utilities: return .orange; case .ai: return .pink
   }
  }
  var summary: String {
@@ -54,13 +55,14 @@ private enum SettingsPage: String, CaseIterable, Identifiable {
   case .appearance: return "Chế độ màu, cỡ chữ và hình nền cuộc trò chuyện."
   case .notifications: return "Thông báo tin nhắn, âm thanh và huy hiệu."
   case .messages: return "Cách soạn, đọc và lưu tin nhắn."
+  case .automation: return "Trả lời tự động, trả lời theo từ khóa và hẹn giờ gửi tin."
   case .calls: return "Micrô, camera và thông báo cuộc gọi."
   case .utilities: return "Gợi ý khi soạn và chụp màn hình."
   case .ai: return "Cho trợ lý AI trên máy đọc các hội thoại bạn chọn."
   }
  }
  var icon: String {
-  switch self { case .general: return "switch.2"; case .updates: return "arrow.down.circle"; case .security: return "lock.shield"; case .privacy: return "hand.raised"; case .sync: return "arrow.triangle.2.circlepath"; case .storage: return "internaldrive"; case .appearance: return "paintpalette"; case .notifications: return "bell.badge"; case .messages: return "bubble.left"; case .calls: return "video"; case .utilities: return "slider.horizontal.3"; case .ai: return "sparkles" }
+  switch self { case .general: return "switch.2"; case .updates: return "arrow.down.circle"; case .security: return "lock.shield"; case .privacy: return "hand.raised"; case .sync: return "arrow.triangle.2.circlepath"; case .storage: return "internaldrive"; case .appearance: return "paintpalette"; case .notifications: return "bell.badge"; case .messages: return "bubble.left"; case .automation: return "arrowshape.turn.up.left.2"; case .calls: return "video"; case .utilities: return "slider.horizontal.3"; case .ai: return "sparkles" }
  }
 }
 
@@ -295,6 +297,8 @@ struct SettingsView: View {
    }
    Section("Tin nhắn nhanh") { Button("Quản lý mẫu tin…") { store.showingQuickReplies = true }.disabled(!store.supports("upsert_quick_reply")); serverToggle("Bật tin nhắn nhanh trên tài khoản", key: "quick_message_status") }
    Section("Tải nội dung") { unavailable("Tự động tải trước media dưới 30 MB chưa được kích hoạt. Nội dung được tải khi mở hoặc lưu."); unavailable("Chuyển clipboard Excel thành ảnh cần bộ chuyển đổi bảng; hiện ô nhập nhận văn bản.") }
+  case .automation:
+   AutomationSettings()
   case .calls:
    Section("Thiết bị") {
     devicePicker("Micrô", list: "microphones", selected: "selected_microphone", parameter: "microphone")

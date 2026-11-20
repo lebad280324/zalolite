@@ -25,6 +25,6 @@ No capture yet shows which push (if any) Zalo sends to a ringing desktop when th
 
 ## Not verified
 
-Rule 1 rests on Zalo's multi-device echo, which has not been captured. Rules 2 and 3 cover the
+Rule 1 never matched: the `answer` carries the caller's `uidN`. Replaced by re-notes/80. Rules 2 and 3 cover the
 case where no echo arrives. Next live test: answer on the phone and check `call_trace.log` for
 the event that arrives here.

@@ -948,13 +948,11 @@ pub(super) fn spawn_session_worker(session: Session, gui_tx: GuiTx, egui_ctx: eg
                             let session_clone = session.clone();
                             tokio::spawn(async move {
                                 let s = session_clone.lock().await.clone();
-                                let _ = crate::chat::delete_conversation(
-                                    &s,
-                                    &thread_id,
-                                    is_group,
-                                    &last_cli_msg_id,
-                                )
-                                .await;
+                                // The legacy GUI only knows the last client ID, not the full
+                                // message Zalo PC names; send it as the anchor's client ID.
+                                let conver = serde_json::json!({"cliMsgId": last_cli_msg_id});
+                                let _ = crate::chat::delete_conversation(&s, &thread_id, is_group, &conver)
+                                    .await;
                             });
                         }
                         WorkerCmd::RequestQr => {

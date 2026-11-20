@@ -7591,63 +7591,74 @@ pub async fn set_hidden_conversation(
     Ok(s.maybe_decrypt(resp, s.session_key_bytes()).await)
 }
 
-/// Delete conversation history for me (`deleteOneOneConversationV2` / `deleteGroupConversationV2` @ `compact-app-pc.js:14374881`, cmd `11778` / `11835`).
+/// The newest message Zalo PC names when it deletes a conversation (`_initObjDel` @
+/// `compact-app-pc.js`): `{ownerId, cliMsgId, globalMsgId}` of the last message that has a server
+/// ID. `None` when no such message is loaded; Zalo PC then deletes only locally (re-notes/78).
+pub(crate) fn delete_conversation_anchor(messages: &[ChatMessage], thread_id: &str, is_group: bool, my_uid: &str) -> Option<Value> {
+    let has_server_id = |m: &&ChatMessage| m.id.trim().parse::<u64>().is_ok_and(|id| id > 0);
+    let has_client_id = |m: &&ChatMessage| m.client_message_id.trim().parse::<u64>().is_ok_and(|id| id > 0);
+    let candidates = || messages.iter().rev().filter(has_server_id);
+    let pick = candidates().find(has_client_id).or_else(|| candidates().next())?;
+    let mut target = delete_target(pick, thread_id, is_group, my_uid, 0).ok()?;
+    target.as_object_mut()?.remove("destId");
+    Some(target)
+}
+
+/// Delete conversation history for me (`deleteOneOneConversationV2` / `deleteGroupConversationV2` @
+/// `compact-app-pc.js:14374881`, cmd `11778` / `11835`). `conver` is the newest message
+/// ([`delete_conversation_anchor`]); the top-level `cliMsgId` is a fresh request ID (`h.a.next()`).
 pub async fn delete_conversation(
     s: &Session,
     thread_id: &str,
     is_group: bool,
-    last_cli_msg_id: &str,
+    conver: &Value,
 ) -> Result<Value> {
     if s.login.is_none() {
         anyhow::bail!("chưa đăng nhập");
     }
+    let (body, url) = delete_conversation_request(thread_id, is_group, conver, next_client_message_id(), &s.imei);
+    let url = if is_group {
+        format!("{}{url}?{}", s.domains.group, s.common_params())
+    } else {
+        format!("{}{url}?{}", s.domains.chat, s.common_params())
+    };
+    let params = s.encoded_params(&body)?;
+    let resp = s.post_form(&url, format!("params={params}")).await?;
+    Ok(s.maybe_decrypt(resp, s.session_key_bytes()).await)
+}
+
+fn delete_conversation_request(thread_id: &str, is_group: bool, conver: &Value, request_id: u64, imei: &str) -> (Value, &'static str) {
     let clean = thread_id
         .trim_start_matches("group_")
         .trim_start_matches('g')
         .trim_start_matches('G')
         .trim();
-    let cli_id = if last_cli_msg_id.is_empty() {
-        format!("{}", crate::login::unix_now() * 1000)
-    } else {
-        last_cli_msg_id.to_string()
-    };
-    if is_group {
-        let body = json!({
-            "grid": clean,
-            "cliMsgId": cli_id,
-            "conver": {},
-            "onlyMe": 1,
-            "imei": s.imei
-        });
-        let params = s.encoded_params(&body)?;
-        let url = format!(
-            "{}/api/group/deleteconver?{}",
-            s.domains.group,
-            s.common_params()
-        );
-        let resp = s.post_form(&url, format!("params={params}")).await?;
-        Ok(s.maybe_decrypt(resp, s.session_key_bytes()).await)
-    } else {
-        let body = json!({
-            "toid": clean,
-            "cliMsgId": cli_id,
-            "conver": {},
-            "onlyMe": 1,
-            "imei": s.imei
-        });
-        let params = s.encoded_params(&body)?;
-        let url = format!(
-            "{}/api/message/deleteconver?{}",
-            s.domains.chat,
-            s.common_params()
-        );
-        let resp = s.post_form(&url, format!("params={params}")).await?;
-        Ok(s.maybe_decrypt(resp, s.session_key_bytes()).await)
-    }
+    let (key, path) = if is_group { ("grid", "/api/group/deleteconver") } else { ("toid", "/api/message/deleteconver") };
+    (json!({key: clean, "cliMsgId": request_id.to_string(), "conver": conver, "onlyMe": 1, "imei": imei}), path)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deleting_a_conversation_names_its_newest_server_message() {
+        let mut sent = ChatMessage { id: "8101".into(), ts: 1, client_message_id: "1795000000100".into(), is_outgoing: true, ..Default::default() };
+        sent.wire_ref = Default::default();
+        let mut received = ChatMessage { id: "8102".into(), ts: 2, client_message_id: "1795000000123".into(), ..Default::default() };
+        received.wire_ref = crate::message_model::WireMessageRef::from_raw(&json!({"uidFrom": "6120000000000000643"}));
+        let pending = ChatMessage { id: "local-1".into(), ts: 3, is_outgoing: true, ..Default::default() };
+        let anchor = delete_conversation_anchor(&[sent.clone(), received, pending.clone()], "g555", true, "777").unwrap();
+        assert_eq!(anchor, json!({"ownerId": "6120000000000000643", "cliMsgId": "1795000000123", "globalMsgId": "8102"}));
+        let one_one = delete_conversation_anchor(&[sent], "4321", false, "777").unwrap();
+        assert_eq!(one_one["ownerId"], json!("777"));
+        assert!(delete_conversation_anchor(&[pending], "4321", false, "777").is_none());
+
+        let (body, path) = delete_conversation_request("g555", true, &anchor, 1795000000999, "imei-x");
+        assert_eq!(path, "/api/group/deleteconver");
+        assert_eq!(body, json!({"grid": "555", "cliMsgId": "1795000000999", "conver": anchor, "onlyMe": 1, "imei": "imei-x"}));
+        let (body, path) = delete_conversation_request("4321", false, &json!({}), 5, "imei-x");
+        assert_eq!((body["toid"].clone(), path), (json!("4321"), "/api/message/deleteconver"));
+    }
+
     #[test]
     fn delete_targets_use_sender_uid_and_client_id() {
         let mut msg = ChatMessage { id: "8102".into(), sender: "Thu MKT".into(), ts: 1_795_000_000_000,

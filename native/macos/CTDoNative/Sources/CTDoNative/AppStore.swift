@@ -146,6 +146,10 @@ final class AppStore: ObservableObject {
     var pollRequested: [UInt64: Date] = [:]
     var stickerArtCategories: Set<UInt64> = []
     @Published var scheduledMessages: [ScheduledMessage] = []
+    @Published var serverAutoReplies: [ServerAutoReply] = []
+    @Published var serverAutoRepliesLoaded = false
+    @Published var serverAutoReplyError: String?
+    @Published var keywordReplies: KeywordReplySettings?
     var forwardMessage: MessageSnapshot?
     var forwardSourceThread: ThreadSnapshot?
     var proposedDataDirectory: URL?
@@ -722,6 +726,10 @@ final class AppStore: ObservableObject {
         if event.ok != true {
             if quiet { return }
             if handleAdditionsFailure(command: action.command, requestID: id, threadID: action.threadID) { return }
+            if action.command == "server_auto_replies" {
+                // Shown inside the Settings section; most accounts do not have Zalo Business.
+                serverAutoReplyError = event.error ?? "Không tải được trả lời tự động."; serverAutoRepliesLoaded = true; return
+            }
             if event.error == Self.sendBlockedMessage, let threadID = action.threadID {
                 // Shown as a bar above this conversation's composer instead of a generic banner.
                 sendBlocked.insert(threadID); return
@@ -753,6 +761,7 @@ final class AppStore: ObservableObject {
         if ["get_account_settings", "set_account_setting", "set_two_factor"].contains(action.command) { accountSettings = event.data }
         if action.command == "list_media_devices" || action.command == "select_media_devices" { mediaDevices = event.data }
         if action.command == "poll_detail" || action.command == "poll_vote" { handlePollResult(event.data) }
+        if handleAutoReplyResult(command: action.command, data: event.data) { return }
         do {
             switch action.command {
             case "lookup_phone": contactResult = event.data
@@ -820,7 +829,7 @@ final class AppStore: ObservableObject {
         features = BAFeatureState(); workspaceSection = .messages
         selectedMessageIDs.removeAll(); selectingMessages = false; messageDetails = nil
         recentlyOpenedIDs.removeAll(); copyImageRequests.removeAll(); privacyGuard = nil; mediaDevices = nil; accountSettings = nil
-        stickerPacks = []; stickerItems = []; scheduledMessages = []
+        stickerPacks = []; stickerItems = []; scheduledMessages = []; serverAutoReplies = []; serverAutoRepliesLoaded = false; serverAutoReplyError = nil; keywordReplies = nil
         contactResult = nil; showingContactLookup = false; conversationSearch = ""; unreadOnly = false
         showingStickers = false; showingForward = false; showingScheduled = false
         forwardMessage = nil; forwardSourceThread = nil; forwardQueue = []
