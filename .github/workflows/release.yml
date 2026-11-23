@@ -1,0 +1,157 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds both macOS editions, signs them ad-hoc, publishes the GitHub Release
+# with docs/releases/vX.Y.Z.md as its notes, and points the Homebrew cask at it.
+# The release title is the tag's message: git tag -a v0.0.22 -m "Zalolite v0.0.22 — …"
+# Run it by hand with publish off to build the files without releasing anything.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the GitHub Release and update the Homebrew cask"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+  CTDOZLITE_SWIFT_BUILD_SYSTEM: native
+
+jobs:
+  build:
+    runs-on: macos-26
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Read the version
+        id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version $version"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = tag ] || [ "${{ inputs.publish }}" = true ]; then
+            test -f "docs/releases/v$version.md" || { echo "::error::Missing docs/releases/v$version.md"; exit 1; }
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run Rust tests
+        run: cargo test --locked
+      - name: Run Swift tests
+        run: swift test --build-system native --package-path native/macos/CTDoNative --scratch-path target/swift-native --configuration release --disable-sandbox
+
+      - name: Build the macOS 14 edition
+        run: bash packaging/package-native-macos.sh
+      - name: Build the macOS 13 edition
+        run: bash packaging/package-native-macos.sh --macos13
+      - name: Check the worker
+        run: |
+          CTDOZLITE_TEST_CORE="$PWD/dist/Zalolite.app/Contents/Helpers/ctdozlite-core" python3 tests/native_core_stdio.py
+          python3 tests/native_worker_ownership.py dist/Zalolite.app/Contents/Helpers/ctdozlite-core
+
+      - name: Make the release files
+        run: sh packaging/make-native-release.sh
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: zalolite-${{ steps.version.outputs.version }}
+          path: |
+            dist/Zalolite-*.dmg
+            dist/Zalolite-*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.ref_type == 'tag' || inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@v6
+        with:
+          name: zalolite-${{ needs.build.outputs.version }}
+          path: dist
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          title=$(git for-each-ref "refs/tags/v$VERSION" --format='%(contents:subject)')
+          [ -n "$title" ] || title="Zalolite v$VERSION"
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --target main \
+            --title "$title" --notes-file "docs/releases/v$VERSION.md" \
+            dist/Zalolite-*.dmg dist/Zalolite-*.zip dist/SHA256SUMS.txt
+
+  homebrew:
+    needs: [build, publish]
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - name: Check for the tap key
+        id: key
+        env:
+          KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::warning::HOMEBREW_TAP_DEPLOY_KEY is not set; the tap picks up v$VERSION on its next scheduled run."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          repository: lebad280324/homebrew-zalolite
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+      - name: Point the cask at the release
+        if: steps.key.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/update-cask.sh "$VERSION"
+      - name: Check the cask installs
+        if: steps.key.outputs.present == 'true'
+        run: |
+          git diff --quiet && exit 0
+          brew tap-new --no-git local/test
+          mkdir -p "$(brew --repository local/test)/Casks"
+          cp Casks/zalolite.rb "$(brew --repository local/test)/Casks/zalolite.rb"
+          brew style local/test/zalolite
+          brew install --cask local/test/zalolite
+          test -d /Applications/Zalolite.app
+          brew uninstall --cask local/test/zalolite
+      - name: Push the cask
+        if: steps.key.outputs.present == 'true'
+        run: |
+          git diff --quiet && { echo "Cask already at $VERSION"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "zalolite $VERSION"
+          git push
