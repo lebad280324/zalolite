@@ -103,6 +103,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
+          # Checkout leaves a lightweight copy of the tag; fetch the annotated one to read its message.
+          git fetch --force origin "refs/tags/v$VERSION:refs/tags/v$VERSION"
           title=$(git for-each-ref "refs/tags/v$VERSION" --format='%(contents:subject)')
           [ -n "$title" ] || title="Zalolite v$VERSION"
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --target main \
