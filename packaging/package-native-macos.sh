@@ -104,7 +104,10 @@ if [[ "$WITH_HELPERS" == 1 ]]; then
     cp sync_v2_helper.js zproto_lib.js "$APP/Contents/Resources/"
 fi
 # Zalolite has its own logo; the egui app keeps src/assets/app_icon.png.
-ICON_SOURCE="packaging/macos/zalolite_icon.png"
+# Center the tile on a transparent canvas to match the footprint of system Dock icons.
+ICON_SOURCE="$STAGE_DIR/AppIcon.png"
+sips -s format png -z 824 824 packaging/macos/zalolite_icon.png --out "$ICON_SOURCE" >/dev/null
+sips -p 1024 1024 "$ICON_SOURCE" >/dev/null
 ICONSET="$STAGE_DIR/AppIcon.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
