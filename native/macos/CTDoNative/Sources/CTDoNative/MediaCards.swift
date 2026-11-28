@@ -59,7 +59,7 @@ enum RichMedia {
 
     static func isRich(_ message: MessageSnapshot) -> Bool {
         plainURL(message) != nil || voiceURL(message) != nil || video(message) != nil || CallRecord(message) != nil
-            || ContactCardInfo(message) != nil
+            || ContactCardInfo(message) != nil || BoardCardInfo(message) != nil
     }
 }
 

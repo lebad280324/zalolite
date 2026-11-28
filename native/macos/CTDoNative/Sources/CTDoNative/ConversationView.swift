@@ -647,6 +647,10 @@ struct MessageRow: View, Equatable {
                     if showSender { senderLine.padding(.leading, 4) }
                     ContactShareCard(info: contact, time: message.date)
                         .overlay { if highlighted { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.orange, lineWidth: 2) } }
+                } else if let board = BoardCardInfo(message) {
+                    if showSender { senderLine.padding(.leading, 4) }
+                    BoardCard(info: board, time: message.date)
+                        .overlay { if highlighted { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.orange, lineWidth: 2) } }
                 } else if let record = CallRecord(message) {
                     CallCard(record: record, outgoing: message.isOutgoing, time: message.date)
                         .overlay { if highlighted { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.orange, lineWidth: 2) } }

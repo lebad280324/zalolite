@@ -19,6 +19,6 @@ struct GroupEditor: View {
     else{params["name"] = .string(name);store.send("create_group",parameters:params)}
    }.buttonStyle(.borderedProminent).disabled(selected.isEmpty || (thread == nil && name.trimmingCharacters(in:.whitespaces).isEmpty))
    if let error=store.error{Text(verbatim:error).foregroundStyle(.orange)}
-  }.padding(26).frame(width:490,height:490).onAppear{store.send("list_contacts");if let preselected{selected.insert(preselected)}}
+  }.padding(26).frame(width:490,height:490).onAppear{store.loadContactLists();if let preselected{selected.insert(preselected)}}
  }
 }

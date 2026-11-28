@@ -484,9 +484,11 @@ pub(super) async fn execute(
             } else {
                 let groups = matches!(command, FeatureCommand::ListGroupInvitations);
                 let (service, path, params) = match command {
+                    // Received requests (Zalo PC `getRecommendedFriendsV2`, cmd 11437).
+                    // `requested/list` (12203) is the list of requests this account sent.
                     FeatureCommand::ListFriendRequests => (
                         "friend",
-                        "/api/friend/requested/list",
+                        "/api/friend/recommendsv2/list",
                         json!({"imei":session.imei}),
                     ),
                     FeatureCommand::ListBlockedContacts => (
@@ -501,6 +503,13 @@ pub(super) async fn execute(
                     ),
                 };
                 let data = zalo_actions::get_json(session, service, path, &params).await?;
+                if matches!(command, FeatureCommand::ListFriendRequests) {
+                    let Some(items) = zalo_actions::received_friend_requests(&data) else {
+                        bail!(super::UserError("Zalo trả về danh sách lời mời chưa được hỗ trợ. Hãy thử lại sau khi cập nhật ứng dụng."));
+                    };
+                    // Zalo PC shows this reply as the whole list.
+                    return Ok(json!({"items":items,"partial":false,"scope":"server"}));
+                }
                 let items = if matches!(command, FeatureCommand::ListBlockedContacts) {
                     zalo_actions::blocked_rows(&data)
                 } else {

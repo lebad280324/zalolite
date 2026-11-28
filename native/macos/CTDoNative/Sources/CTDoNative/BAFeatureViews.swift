@@ -11,7 +11,7 @@ struct FeatureSectionSidebar: View {
    Text(store.workspaceSection == .contacts ? "Danh bạ" : "Đã lưu").font(.title2.bold())
    if store.workspaceSection == .contacts {
     ForEach(ContactSection.allCases) { section in
-     Button { store.contactSection = section } label: { HStack { Text(section.rawValue); Spacer() }.padding(.horizontal, 12).padding(.vertical, 9).foregroundStyle(section == store.contactSection ? Color.white : Color(nsColor: .labelColor)).background(section == store.contactSection ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 10)).contentShape(RoundedRectangle(cornerRadius: 10)) }.buttonStyle(.plain)
+     Button { store.contactSection = section } label: { HStack { Text(section.rawValue); Spacer(); if section == .invitations, !store.features.friendInvitations.isEmpty { Text("\(store.features.friendInvitations.count)").font(.caption.weight(.semibold)).monospacedDigit() } }.padding(.horizontal, 12).padding(.vertical, 9).foregroundStyle(section == store.contactSection ? Color.white : Color(nsColor: .labelColor)).background(section == store.contactSection ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 10)).contentShape(RoundedRectangle(cornerRadius: 10)) }.buttonStyle(.plain)
     }
     Button("Tìm bạn mới…") { store.showingContactLookup = true }.disabled(!store.supports("lookup_phone"))
    } else {
@@ -31,7 +31,10 @@ struct ContactsWorkspace: View {
  @State var query = ""
  @State var ascending = true
  var rows: [FeatureRow] {
-  (store.contactSection == .groups ? store.features.groups : store.contactSection == .invitations ? store.features.friendInvitations : store.contactSection == .groupInvitations ? store.features.groupInvitations : store.contactSection == .blocked ? store.features.blockedContacts : store.features.contacts)
+  if store.contactSection == .invitations {
+   return store.features.friendInvitations.filter { query.isEmpty || $0.string("name").localizedStandardContains(query) }
+  }
+  return (store.contactSection == .groups ? store.features.groups : store.contactSection == .invitations ? store.features.friendInvitations : store.contactSection == .groupInvitations ? store.features.groupInvitations : store.contactSection == .blocked ? store.features.blockedContacts : store.features.contacts)
    .filter { query.isEmpty || $0.string("name").localizedStandardContains(query) }
    .sorted { ($0.string("name").localizedStandardCompare($1.string("name")) == .orderedAscending) == ascending }
  }
@@ -42,27 +45,42 @@ struct ContactsWorkspace: View {
   for row in rows { let letter = ComposerAssistText.sectionLetter(row.string("name")); if groups[letter] == nil { order.append(letter) }; groups[letter, default: []].append(row) }
   return order.map { ($0, groups[$0] ?? []) }
  }
+ /// The list command behind the sections that can arrive incomplete.
+ var sectionCommand: String? {
+  switch store.contactSection {
+  case .invitations: return "list_friend_requests"
+  case .groupInvitations: return "list_group_invitations"
+  case .blocked: return "list_blocked_contacts"
+  default: return nil
+  }
+ }
  var listBusy: Bool { !store.busy.isDisjoint(with: ["list_contacts", "list_groups", "list_friend_requests", "list_group_invitations", "list_blocked_contacts"]) }
  var body: some View {
   VStack(alignment: .leading, spacing: 18) {
-   HStack { Text(store.contactSection.rawValue).font(.title.bold()); Spacer(); if store.supports("create_group") {Button("Tạo nhóm…"){store.showingCreateGroup=true}}; Button("Làm mới", systemImage: "arrow.clockwise") { reload() } }
+   HStack { Text(store.contactSection.rawValue).font(.title.bold()); Spacer(); if store.supports("create_group") {Button("Tạo nhóm…"){store.showingCreateGroup=true}}; Button("Làm mới", systemImage: "arrow.clockwise") { reload(force: true) } }
    Group {
     HStack { TextField(store.contactSection == .groups ? "Tìm nhóm" : "Tìm bạn theo tên", text: $query).textFieldStyle(.roundedBorder); Picker("Sắp xếp", selection: $ascending) { Text("A–Z").tag(true); Text("Z–A").tag(false) }.frame(width: 140); Text("\(rows.count) mục").foregroundStyle(.secondary) }
-    if store.features.partialLists.contains(where: { $0.hasPrefix("list_") }) && [.invitations, .groupInvitations, .blocked].contains(store.contactSection) {
+    if let command = sectionCommand, store.features.partialLists.contains(command) {
      Label("Danh sách này mới tải trang đầu, có thể chưa đầy đủ.", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
     }
     List { ForEach(sections, id: \.0) { letter, items in Section(letter) { ForEach(items) { row in
      HStack(spacing: 12) {
       AvatarView(name: row.string("name"), url: row.string("avatar"), size: 42, group: store.contactSection == .groups)
-      VStack(alignment: .leading, spacing: 4) { Text(verbatim: row.string("name")).font(.headline); if row.number("member_count") > 0 { Text("\(Int(row.number("member_count"))) thành viên").font(.caption).foregroundStyle(.secondary) } }
+      VStack(alignment: .leading, spacing: 4) {
+       Text(verbatim: row.string("name")).font(.headline).lineLimit(2)
+       if row.number("member_count") > 0 { Text("\(Int(row.number("member_count"))) thành viên").font(.caption).foregroundStyle(.secondary) }
+       if store.contactSection == .invitations { FriendRequestDetail(row: row) }
+      }
       Spacer()
       if store.contactSection == .invitations {
-       Button("Chấp nhận"){store.send("accept_friend",parameters:["user_id":.string(row.id)])}
-       Button("Từ chối"){store.send("reject_friend",parameters:["user_id":.string(row.id)])}
+       Button("Chấp nhận"){store.send("accept_friend",parameters:["user_id":.string(row.id)])}.fixedSize()
+        .disabled(store.busy.contains("accept_friend"))
+       Button("Từ chối"){store.send("reject_friend",parameters:["user_id":.string(row.id)])}.fixedSize()
+        .disabled(store.busy.contains("reject_friend"))
       }
       if store.contactSection == .groupInvitations {Button("Tham gia"){store.send("join_group_invitation",parameters:["thread_id":.string(row.id)])}}
       if store.contactSection == .blocked {Button("Bỏ chặn"){store.send("set_contact_blocked",parameters:["user_id":.string(row.id),"blocked":.bool(false)])}}
-      Button("Nhắn tin") { store.openContact(row) }
+      Button("Nhắn tin") { store.openContact(row) }.fixedSize()
        .disabled(!store.supports("open_contact") && !store.threads.contains { $0.id == row.id })
       if store.contactSection == .friends && store.supports("check_friend") { Button("Kết nối") { store.send("check_friend", parameters: ["user_id": .string(row.id)]) } }
      }.padding(.vertical, 7)
@@ -92,7 +110,7 @@ struct ContactsWorkspace: View {
    Button("Thêm thành viên…", systemImage: "person.badge.plus") { store.groupToInvite = thread }
   }
  }
- func reload(){store.showContacts();let command = store.contactSection == .invitations ? "list_friend_requests" : store.contactSection == .groupInvitations ? "list_group_invitations" : store.contactSection == .blocked ? "list_blocked_contacts" : "";if !command.isEmpty && store.supports(command){store.send(command)}}
+ func reload(force: Bool = false){store.workspaceSection = .contacts;store.loadContactLists(force: force);let command = store.contactSection == .invitations ? "list_friend_requests" : store.contactSection == .groupInvitations ? "list_group_invitations" : store.contactSection == .blocked ? "list_blocked_contacts" : "";if !command.isEmpty && store.supports(command) && !store.busy.contains(command){store.send(command)}}
 }
 
 struct SavedWorkspace: View {
@@ -255,5 +273,39 @@ struct MessageDetailsView: View {
    Form { LabeledContent("Mã tin", value: message.id); LabeledContent("Người gửi", value: message.senderName); LabeledContent("Thời gian", value: message.date.formatted(date: .abbreviated, time: .standard)); LabeledContent("Loại", value: message.messageType) }.textSelection(.enabled)
    ScrollView { Text(verbatim: message.text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
   }.padding(26).frame(width: 530, height: 390)
+ }
+}
+
+/// The note and date a sender attached to a friend request, as Zalo shows them.
+struct FriendRequestDetail: View {
+ let row: FeatureRow
+ var body: some View {
+  let note = row.string("message")
+  let time = row.number("time")
+  VStack(alignment: .leading, spacing: 2) {
+   if !note.isEmpty { Text(verbatim: note).font(.callout).lineLimit(3).textSelection(.enabled) }
+   if time > 0 {
+    Text(Date(timeIntervalSince1970: time / 1000), format: .dateTime.day().month().year().hour().minute())
+     .font(.caption).foregroundStyle(.secondary)
+   }
+  }
+ }
+}
+
+/// A row above the conversation list while friend requests wait for an answer.
+struct FriendRequestsBanner: View {
+ @EnvironmentObject var store: AppStore
+ var body: some View {
+  let count = store.features.friendInvitations.count
+  if count > 0 && store.supports("list_friend_requests") {
+   Button { store.showFriendRequests() } label: {
+    HStack(spacing: 8) {
+     Image(systemName: "person.crop.circle.badge.plus").foregroundStyle(.tint)
+     Text("\(count) lời mời kết bạn").font(.callout.weight(.medium))
+     Spacer(minLength: 0)
+     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+    }.padding(.horizontal, 16).padding(.vertical, 6).contentShape(Rectangle())
+   }.buttonStyle(.plain).padding(.bottom, 4).help("Mở danh sách lời mời kết bạn")
+  }
  }
 }

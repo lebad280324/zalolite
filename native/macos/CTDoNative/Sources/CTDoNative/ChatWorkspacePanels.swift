@@ -59,7 +59,7 @@ struct GlobalSearchPanel: View {
                 }
             }
             if kind != "contacts" {Text("Lịch sử trên máy · tối đa 300 kết quả").font(.caption2).foregroundStyle(.secondary)}
-        }.padding(16).frame(width:410,height:470).onAppear{focused=true;if store.supports("list_contacts"){store.send("list_contacts")}}
+        }.padding(16).frame(width:410,height:470).onAppear{focused=true;store.loadContactLists()}
          .task(id:query+"/"+kind){guard kind != "contacts" else{return};store.historyResults=[];try? await Task.sleep(nanoseconds:220_000_000);guard !Task.isCancelled else{return};store.searchHistory(query,onlyCurrentThread:false,filesOnly:kind == "files")}
     }
 }
@@ -115,7 +115,7 @@ struct ContactCardPicker:View {
             TextField("Tìm liên hệ",text:$query).textFieldStyle(.roundedBorder)
             List(store.features.contacts.filter{query.isEmpty || $0.string("name","display_name").localizedStandardContains(query)},selection:$selected){row in HStack{AvatarView(name:row.string("name","display_name"),url:row.string("avatar"),size:34);Text(verbatim:row.string("name","display_name"))}.tag(row.id)}
             HStack{Spacer();Button("Gửi danh thiếp"){if let selected{store.send("send_contact",parameters:["thread_id":.string(thread.id),"contact_id":.string(selected)],threadID:thread.id);dismiss()}}.buttonStyle(.borderedProminent).disabled(selected==nil || !store.canSend)}
-        }.padding(22).frame(width:420,height:460).onAppear{if store.supports("list_contacts"){store.send("list_contacts")}}
+        }.padding(22).frame(width:420,height:460).onAppear{store.loadContactLists()}
     }
 }
 

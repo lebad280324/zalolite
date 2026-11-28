@@ -157,6 +157,37 @@ pub(super) async fn pinned_topics(session: &Session, thread_id: &str) -> Result<
     Ok(parse_pinned(&response))
 }
 
+/// Friend requests sent to this account, as Zalo PC's `getListFriendRequest` reads them from
+/// `/api/friend/recommendsv2/list`: items of `recommItems` whose `dataInfo.recommType` is 2,
+/// newest first (re-notes/81). Other items are friend suggestions.
+pub(super) fn received_friend_requests(data: &Value) -> Option<Vec<Value>> {
+    let items = data.get("recommItems")?.as_array()?;
+    let mut rows: Vec<(i64, Value)> = items
+        .iter()
+        .filter_map(|item| item.get("dataInfo"))
+        .filter(|info| info.get("recommType").and_then(Value::as_i64) == Some(2))
+        .filter_map(|info| {
+            let id = pick(info, &["userId", "uid"]);
+            let name = pick(info, &["displayName", "zaloName"]);
+            if id.is_empty() {
+                return None;
+            }
+            let name = if name.is_empty() { "Người dùng Zalo".to_owned() } else { name };
+            let time = info.get("recommTime").and_then(Value::as_i64).unwrap_or(-1);
+            let message = info
+                .get("recommInfo")
+                .map(|recomm| pick(recomm, &["message"]))
+                .unwrap_or_default();
+            let row = json!({"id":id,"user_id":id,"name":name,"display_name":name,
+                "avatar":safe_url(info.get("avatar").and_then(Value::as_str)),
+                "message":message,"time":if time > 0 { json!(time) } else { Value::Null },"is_group":false});
+            Some((time, row))
+        })
+        .collect();
+    rows.sort_by_key(|row| std::cmp::Reverse(row.0));
+    Some(rows.into_iter().map(|(_, row)| row).collect())
+}
+
 pub(super) fn pick(value: &Value, keys: &[&str]) -> String {
     keys.iter()
         .find_map(|key| match value.get(*key) {
@@ -236,6 +267,23 @@ pub(super) async fn members(session: &Session, thread_id: &str) -> Result<Vec<Va
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn received_friend_requests_keep_only_requests_newest_first() {
+        let data = json!({"recommItems":[
+            {"recommItemType":1,"dataInfo":{"userId":"1","displayName":"Gợi ý","recommType":1,"recommTime":5}},
+            {"recommItemType":1,"dataInfo":{"userId":"2","displayName":"Cũ","recommType":2,"recommTime":10,
+                "recommInfo":{"message":"Xin chào","source":1},"avatar":"https://s120.avatar.talk.zdn.vn/a.jpg"}},
+            {"recommItemType":1,"dataInfo":{"userId":"3","zaloName":"Mới","recommType":2,"recommTime":20}}
+        ]});
+        let rows = received_friend_requests(&data).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], "3");
+        assert_eq!(rows[0]["name"], "Mới");
+        assert_eq!(rows[1]["message"], "Xin chào");
+        assert_eq!(rows[1]["time"], 10);
+        assert!(received_friend_requests(&json!({"recommItems":[]})).unwrap().is_empty());
+        assert!(received_friend_requests(&json!({"other":1})).is_none());
+    }
     #[test]
     fn pinned_metadata_excludes_unknown_and_secret_fields() {
         let output = parse_pinned(

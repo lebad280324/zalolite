@@ -1525,7 +1525,7 @@ fn extract_zalo_message_text_and_meta(
             return (inner.to_string(), meta);
         }
         // Contact cards, calls, event lines and official-account templates (re-notes/65).
-        if val.is_object() {
+        if val.is_object() || val.is_array() {
             use crate::chat::RichCard;
             match crate::chat::rich_card(&val) {
                 Some(RichCard::Contact { user_id, name, avatar, qr }) => {
@@ -1546,6 +1546,17 @@ fn extract_zalo_message_text_and_meta(
                     return (text, meta);
                 }
                 Some(RichCard::Text(text)) => return (text, meta),
+                Some(RichCard::Board(parts)) => {
+                    let first = &parts[0];
+                    for (key, value) in [("link_url", &first.url), ("link_desc", &first.desc), ("link_thumb", &first.thumb)] {
+                        if let Some(value) = value {
+                            meta.insert(key.into(), serde_json::json!(value));
+                        }
+                    }
+                    meta.insert("link_title".into(), serde_json::json!(first.title));
+                    meta.insert("card".into(), crate::chat::board_card_json(&parts));
+                    return (first.title.clone(), meta);
+                }
                 _ => {}
             }
         }

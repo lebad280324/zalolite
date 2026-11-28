@@ -56,6 +56,11 @@ enum ContactSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// When each contact list was last requested (see `loadContactLists`).
+@MainActor enum ContactListThrottle {
+    static var loaded: [String: Date] = [:]
+}
+
 @MainActor
 extension AppStore {
     func reloadWorkspaceFeatures() {
@@ -63,8 +68,25 @@ extension AppStore {
     }
     func showContacts() {
         workspaceSection = .contacts
-        if supports("list_contacts") { send("list_contacts") }
-        if supports("list_groups") { send("list_groups") }
+        loadContactLists()
+    }
+    /// Reads friends and groups at most once a minute unless `force`: switching sections reloaded
+    /// both every time, and Zalo answered with HTTP 429 after a few clicks.
+    func loadContactLists(force: Bool = false) {
+        for command in ["list_contacts", "list_groups"] where supports(command) && !busy.contains(command) {
+            if !force, let last = ContactListThrottle.loaded[command], Date().timeIntervalSince(last) < 60 { continue }
+            ContactListThrottle.loaded[command] = Date()
+            send(command)
+        }
+    }
+    func showFriendRequests() {
+        showContacts(); contactSection = .invitations
+        if supports("list_friend_requests") && !busy.contains("list_friend_requests") { send("list_friend_requests") }
+    }
+    /// Reads pending friend requests so the conversation list can show how many wait.
+    func refreshFriendRequests() {
+        guard session.loggedIn, !demo, supports("list_friend_requests"), !busy.contains("list_friend_requests") else { return }
+        send("list_friend_requests")
     }
     func openContact(_ row: FeatureRow) {
         if let existing = threads.first(where: { $0.id == row.id }) {
@@ -147,7 +169,9 @@ extension AppStore {
             }
         case "create_group": showingCreateGroup = false; send("refresh_threads"); if supports("list_groups") { send("list_groups") }
         case "add_group_members": groupToInvite = nil; features.notification = "Đã gửi lời mời vào nhóm"
-        case "accept_friend", "reject_friend": if supports("list_friend_requests") { send("list_friend_requests") }; if supports("list_contacts") { send("list_contacts") }
+        case "accept_friend", "reject_friend":
+            if supports("list_friend_requests") { send("list_friend_requests") }
+            if command == "accept_friend" { loadContactLists(force: true) }
         case "join_group_invitation": if supports("list_group_invitations") { send("list_group_invitations") }; send("refresh_threads")
         case "set_contact_blocked":
             // The change shows at once; the server list (which may lag) is re-read after.
@@ -188,6 +212,7 @@ extension AppStore {
         default: break
         }
         if data?["partial"]?.bool == true { features.partialLists.insert(command) }
+        else if data?["partial"]?.bool == false { features.partialLists.remove(command) }
     }
     func handleBAEvent(_ event: CoreEvent) {
         if let source = event.data?["account"]?.string, source != session.uin { return }

@@ -158,6 +158,14 @@ struct RootView: View {
                 else if store.workspaceSection == .messages { threadList } else { FeatureSectionSidebar() }
             }
             .frame(maxWidth:.infinity,maxHeight: .infinity, alignment: .top)
+            // Zalo sends no push for a new friend request here, so the count is re-read every 5 minutes.
+            .task(id: "\(store.session.uin)|\(store.session.loggedIn)|\(store.ready)") {
+                guard store.ready, store.session.loggedIn else { return }
+                while !Task.isCancelled {
+                    store.refreshFriendRequests()
+                    try? await Task.sleep(nanoseconds: 300_000_000_000)
+                }
+            }
             // Concentric with the window: inner radius = window radius - inset, so both curves run parallel.
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: cardRadius, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: cardRadius, style: .continuous))
@@ -197,6 +205,7 @@ struct RootView: View {
                     Button("Kết nối lại") { store.restart() }.buttonStyle(.plain).font(.caption).foregroundStyle(.tint)
                 }.padding(.horizontal, 16).padding(.bottom, 8)
             }
+            if store.searchText.isEmpty { FriendRequestsBanner() }
             if let label = activeFilterLabel {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle.fill").foregroundStyle(.tint)
@@ -330,6 +339,10 @@ struct RootView: View {
             Section("Xem") {
                 Button("Tin nhắn", systemImage: "message") { store.workspaceSection = .messages }
                 Button("Danh bạ", systemImage: "person.2") { store.showContacts() }
+                if store.supports("list_friend_requests") {
+                    Button(store.features.friendInvitations.isEmpty ? "Lời mời kết bạn" : "Lời mời kết bạn (\(store.features.friendInvitations.count))",
+                           systemImage: "person.crop.circle.badge.plus") { store.showFriendRequests() }
+                }
                 Button("Đã lưu và nhắc hẹn", systemImage: "bookmark") { store.workspaceSection = .saved; store.reloadWorkspaceFeatures() }
                 if store.supports("list_scheduled") {
                     Button("Tin nhắn hẹn giờ…", systemImage: "clock") { store.showingScheduled = true; store.send("list_scheduled") }

@@ -414,6 +414,39 @@ fn composite_avatar(value: Option<&str>) -> (Vec<AvatarMemberDto>, Option<usize>
     (members, total)
 }
 
+/// Incoming messages Zalo still counts as unread, oldest first; Zalo PC acknowledges these, not the
+/// newest row, which may be our own reply (re-notes/83). Falls back to `message_id` or the newest
+/// incoming message when no read point is known.
+fn seen_targets<'a>(
+    messages: &'a [ChatMessage],
+    unread: &crate::unread::UnreadState,
+    message_id: &str,
+) -> Vec<&'a ChatMessage> {
+    let incoming = || {
+        messages
+            .iter()
+            .filter(|m| !m.is_outgoing && m.id.chars().all(|c| c.is_ascii_digit()) && !m.id.is_empty())
+    };
+    let limit = if message_id.is_empty() { None } else { Some(message_id) };
+    let within = |m: &&ChatMessage| {
+        limit.is_none_or(|last| {
+            crate::unread::compare_ids(&m.id, last).is_none_or(|order| !order.is_gt())
+        })
+    };
+    let mut targets: Vec<&ChatMessage> = match unread.last_seen_id.as_deref() {
+        Some(point) => incoming()
+            .filter(|m| crate::unread::compare_ids(&m.id, point).is_some_and(|o| o.is_gt()))
+            .filter(within)
+            .collect(),
+        None => Vec::new(),
+    };
+    if targets.is_empty() {
+        targets.extend(incoming().filter(within).last());
+    }
+    targets.sort_by(|a, b| crate::unread::compare_ids(&a.id, &b.id).unwrap_or(std::cmp::Ordering::Equal));
+    targets
+}
+
 #[derive(Clone, PartialEq, Serialize)]
 struct MessageDto {
     id: String,
@@ -839,9 +872,16 @@ fn safe_error(error: &anyhow::Error) -> String {
     {
         return SEND_STRANGER_BLOCKED_MESSAGE.into();
     }
+    // session.rs words HTTP failures as "HTTP <status> from <url>: …".
+    if error.chain().any(|cause| cause.to_string().starts_with("HTTP 429")) {
+        return RATE_LIMITED_MESSAGE.into();
+    }
     // Underlying protocol errors may embed a raw response or a credential-bearing URL.
     "Không thực hiện được thao tác. Kiểm tra kết nối rồi thử lại.".into()
 }
+
+/// Zalo answers HTTP 429 when one account sends too many requests in a short time.
+const RATE_LIMITED_MESSAGE: &str = "Zalo đang tạm giới hạn vì có quá nhiều yêu cầu. Hãy đợi khoảng một phút rồi thử lại.";
 
 fn check_response(response: &Value) -> Result<()> {
     let code = response
@@ -2004,10 +2044,14 @@ impl Core {
                     message_id
                 };
                 if !self.demo {
-                    check_response(
-                        &chat::send_seen_v2(&self.session, thread_id, *is_group, message_id)
-                            .await?,
-                    )?;
+                    let thread = &self.threads[index];
+                    let seen = seen_targets(&thread.messages, &thread.unread, message_id);
+                    if !seen.is_empty() {
+                        check_response(
+                            &chat::send_seen_messages(&self.session, thread_id, *is_group, &seen)
+                                .await?,
+                        )?;
+                    }
                 }
                 let messages = self.threads[index].messages.clone();
                 self.threads[index].unread.read_visible(&messages);
@@ -2893,6 +2937,26 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn seen_receipt_covers_unread_incoming_messages() {
+        let msg = |id: &str, outgoing: bool| ChatMessage { id: id.into(), is_outgoing: outgoing, ..Default::default() };
+        let messages = vec![msg("100", false), msg("101", false), msg("102", false), msg("103", true)];
+        let unread = crate::unread::UnreadState { last_seen_id: Some("100".into()), ..Default::default() };
+        let ids = |v: Vec<&ChatMessage>| v.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(seen_targets(&messages, &unread, "")), ["101", "102"]);
+        assert_eq!(ids(seen_targets(&messages, &unread, "101")), ["101"]);
+        let unknown = crate::unread::UnreadState::default();
+        assert_eq!(ids(seen_targets(&messages, &unknown, "")), ["102"]);
+        assert!(seen_targets(&[msg("9", true)], &unknown, "").is_empty());
+    }
+
+    #[test]
+    fn rate_limited_requests_say_so() {
+        let error = anyhow::anyhow!("HTTP 429 Too Many Requests from https://example.invalid/api: busy").context("không tải được danh sách bạn bè");
+        assert_eq!(safe_error(&error), RATE_LIMITED_MESSAGE);
+        assert!(safe_error(&anyhow::anyhow!("HTTP 500 from https://example.invalid")).starts_with("Không thực hiện được"));
+    }
 
     #[tokio::test]
     async fn unchanged_snapshot_persistence_benchmark() {

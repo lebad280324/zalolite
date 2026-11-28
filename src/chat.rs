@@ -5506,8 +5506,51 @@ pub enum RichCard {
     Notice(String),
     /// Official-account template (`zinstant`) with only its preview text readable.
     Text(String),
-    /// Official-account article list (`chat.list`): its first article.
-    Article { url: Option<String>, title: String, desc: Option<String>, thumb: Option<String> },
+    /// Official-account article list (`chat.list.action`) or e-card (`chat.ecard`), part by part.
+    Board(Vec<BoardPart>),
+}
+
+/// One part of an official-account card, as Zalo PC draws it: a header (large picture, title and
+/// description) or a child row (small picture and title). See re-notes/82_zalo_notice_cards.md.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoardPart {
+    pub title: String,
+    pub desc: Option<String>,
+    pub thumb: Option<String>,
+    pub url: Option<String>,
+    pub header: bool,
+}
+
+impl BoardPart {
+    fn from_object(item: &Value, header: bool) -> Option<Self> {
+        let desc = text_field(item.get("description"));
+        let title = text_field(item.get("title")).or_else(|| desc.clone())?;
+        Some(Self {
+            desc: desc.filter(|d| *d != title),
+            title,
+            thumb: web_field(item.get("thumb")),
+            url: web_field(item.get("href")),
+            header,
+        })
+    }
+
+    fn to_json(&self) -> Value {
+        serde_json::json!({"title":self.title,"desc":self.desc,"thumb":self.thumb,"url":self.url,"header":self.header})
+    }
+}
+
+/// `chat.ecard` content (title, description, thumb, href) as a one-part card.
+pub fn ecard_board(content: &Value) -> Option<RichCard> {
+    let parsed = match content {
+        Value::String(_) => json_field(Some(content))?,
+        other => other.clone(),
+    };
+    BoardPart::from_object(&parsed, true).map(|part| RichCard::Board(vec![part]))
+}
+
+/// JSON card the native transcript draws for a [`RichCard::Board`].
+pub fn board_card_json(parts: &[BoardPart]) -> Value {
+    serde_json::json!({"kind":"board","parts":parts.iter().map(BoardPart::to_json).collect::<Vec<_>>()})
 }
 
 fn json_field(value: Option<&Value>) -> Option<Value> {
@@ -5551,14 +5594,18 @@ pub fn rich_card(content: &Value) -> Option<RichCard> {
         other => other.clone(),
     };
     if let Value::Array(items) = &parsed {
-        let first = items.iter().find(|item| item.is_object())?;
-        let title = text_field(first.get("title")).or_else(|| text_field(first.get("description")))?;
-        return Some(RichCard::Article {
-            url: web_field(first.get("href")),
-            title,
-            desc: text_field(first.get("description")),
-            thumb: web_field(first.get("thumb")),
-        });
+        let parts: Vec<BoardPart> = items
+            .iter()
+            .filter(|item| item.is_object())
+            .enumerate()
+            .filter_map(|(index, item)| {
+                // Zalo PC: `l.a.header.*` parts are headers, `l.a.child.full` rows; untyped lists lead with a header.
+                let kind = item.get("type").and_then(Value::as_str).unwrap_or_default();
+                let header = if kind.is_empty() { index == 0 } else { kind.starts_with("l.a.header") };
+                BoardPart::from_object(item, header)
+            })
+            .collect();
+        return (!parts.is_empty()).then_some(RichCard::Board(parts));
     }
     let object = parsed.as_object()?;
     let action = object.get("action").and_then(Value::as_str).unwrap_or_default();
@@ -5886,7 +5933,12 @@ fn parse_chat_message(it: &Value) -> Option<ChatMessage> {
         };
 
     let mut card = None;
-    match raw_content_val.and_then(rich_card) {
+    let rich = if msg_type == "chat.ecard" {
+        raw_content_val.and_then(ecard_board).or_else(|| raw_content_val.and_then(rich_card))
+    } else {
+        raw_content_val.and_then(rich_card)
+    };
+    match rich {
         Some(RichCard::Contact { user_id, name, avatar, qr }) => {
             content = format!("[Danh thiếp] {name}");
             link_url = None;
@@ -5922,13 +5974,17 @@ fn parse_chat_message(it: &Value) -> Option<ChatMessage> {
             link_thumb = None;
             link_src = None;
         }
-        Some(RichCard::Article { url, title, desc, thumb }) if link_url.is_none() => {
-            content = title.clone();
-            link_url = url;
-            link_title = Some(title);
-            link_desc = desc;
-            link_thumb = thumb;
+        Some(RichCard::Board(parts)) => {
+            // The first part also fills the link fields, for clients that only read those.
+            let first = &parts[0];
+            content = first.title.clone();
+            link_url = first.url.clone();
+            link_title = Some(first.title.clone());
+            link_desc = first.desc.clone();
+            link_thumb = first.thumb.clone();
             link_src = None;
+            sticker_meta = None;
+            card = Some(board_card_json(&parts));
         }
         _ => {}
     }
@@ -6710,7 +6766,8 @@ pub async fn reject_friend_request(s: &Session, fid: &str) -> Result<Value> {
     if s.login.is_none() {
         anyhow::bail!("chưa đăng nhập");
     }
-    let body = obj(&[("fid", json!(fid)), ("imei", json!(s.imei))]);
+    // Zalo PC `rejectFriendRequest` sends only `fid` (re-notes/81).
+    let body = obj(&[("fid", json!(fid))]);
     let enc = s.encoded_params(&body)?;
     let host = if s.domains.friend.is_empty() {
         "https://tt-friend-wpa.chat.zalo.me"
@@ -6912,13 +6969,112 @@ pub async fn send_typing_indicator(
     Ok(s.maybe_decrypt(resp, s.session_key_bytes()).await)
 }
 
-/// Send a "seen" receipt (`cmd 12118` `/api/message/seenv2` or `cmd 12124` `/api/group/seenv2`),
-/// unless blocked by `block_seen`.
+/// Send a "seen" receipt for one message ID. Prefer [`send_seen_messages`], which carries the
+/// fields Zalo needs to clear the badge on the account's other devices (re-notes/83).
 pub async fn send_seen_v2(
     s: &Session,
     thread_id: &str,
     is_group: bool,
     last_msg_id: &str,
+) -> Result<Value> {
+    if last_msg_id.trim().is_empty() {
+        return Ok(json!({"error_code": 0, "data": {}}));
+    }
+    let item = json!({ "gmi": last_msg_id, "cmi": last_msg_id });
+    send_seen_items(s, thread_id, is_group, vec![item]).await
+}
+
+/// Send a "seen" receipt (`cmd 12118` `/api/message/seenv2` or `cmd 12124` `/api/group/seenv2`) for
+/// the given incoming messages, unless blocked by `block_seen`.
+pub async fn send_seen_messages(
+    s: &Session,
+    thread_id: &str,
+    is_group: bool,
+    messages: &[&ChatMessage],
+) -> Result<Value> {
+    let own = s.login.as_ref().map(|login| login.uin.as_str()).unwrap_or("");
+    let items = seen_items(messages, thread_id, is_group, own);
+    send_seen_items(s, thread_id, is_group, items).await
+}
+
+fn seen_thread_id(thread_id: &str) -> &str {
+    thread_id
+        .trim_start_matches("group_")
+        .trim_start_matches('g')
+        .trim_start_matches('G')
+        .trim_start_matches('u')
+        .trim()
+}
+
+/// Build `msgInfos.data` the way Zalo PC's `sendSeenV2` does: at most the newest 50 messages, each
+/// `{cmi, gmi, si, di, mt, st, at, cmd, ts}`. Unknown numbers are `-1`; a 1:1 `di` equal to the
+/// sender is `"0"`.
+pub fn seen_items(
+    messages: &[&ChatMessage],
+    thread_id: &str,
+    is_group: bool,
+    own_uid: &str,
+) -> Vec<Value> {
+    let thread = seen_thread_id(thread_id);
+    let start = messages.len().saturating_sub(50);
+    messages[start..]
+        .iter()
+        .filter(|m| !m.id.trim().is_empty())
+        .map(|m| {
+            let wire = &m.wire_ref;
+            let text = |value: Option<&Value>| match value {
+                Some(Value::String(v)) => Some(v.clone()),
+                Some(Value::Number(v)) => Some(v.to_string()),
+                _ => None,
+            };
+            let number = |value: Option<&Value>| value.filter(|v| !v.is_null()).cloned().unwrap_or(json!(-1));
+            let client = text(wire.client_id.as_ref())
+                .or_else(|| (!m.client_message_id.is_empty()).then(|| m.client_message_id.clone()))
+                .unwrap_or_else(|| m.id.clone());
+            let sender = text(wire.sender.as_ref())
+                .filter(|v| !v.is_empty() && v != "0")
+                .unwrap_or_else(|| if is_group { String::new() } else { thread.to_string() });
+            let mut dest = text(wire.destination.as_ref()).unwrap_or_default();
+            if let Some(rest) = dest.strip_prefix('g') {
+                dest = rest.to_string();
+            }
+            if dest.is_empty() {
+                dest = if is_group { thread.to_string() } else { own_uid.to_string() };
+            }
+            if !is_group && (dest == sender || dest.is_empty()) {
+                dest = "0".into();
+            }
+            let msg_type = wire
+                .fields
+                .get("originMsgType")
+                .cloned()
+                .or_else(|| wire.original_type.clone())
+                .unwrap_or(json!("webchat"));
+            let ts = wire
+                .ts
+                .clone()
+                .or_else(|| wire.fields.get("sendDttm").cloned())
+                .unwrap_or_else(|| if m.ts > 0 { json!(m.ts.to_string()) } else { json!(-1) });
+            json!({
+                "cmi": client,
+                "gmi": m.id,
+                "si": sender,
+                "di": dest,
+                "mt": msg_type,
+                "st": number(wire.st.as_ref()),
+                "at": number(wire.at.as_ref()),
+                "cmd": number(wire.cmd.as_ref()),
+                "ts": ts,
+            })
+        })
+        .collect()
+}
+
+async fn send_seen_items(
+    s: &Session,
+    thread_id: &str,
+    is_group: bool,
+    items: Vec<Value>,
 ) -> Result<Value> {
     if s.login.is_none() {
         anyhow::bail!("chưa đăng nhập");
@@ -6926,13 +7082,8 @@ pub async fn send_seen_v2(
     if crate::session::privacy_blocker_state().2 {
         return Ok(json!({"error_code": 0, "data": {}}));
     }
-    let clean = thread_id
-        .trim_start_matches("group_")
-        .trim_start_matches('g')
-        .trim_start_matches('G')
-        .trim_start_matches('u')
-        .trim();
-    if clean.is_empty() || last_msg_id.trim().is_empty() {
+    let clean = seen_thread_id(thread_id);
+    if clean.is_empty() || items.is_empty() {
         return Ok(json!({"error_code": 0, "data": {}}));
     }
     let (endpoint, path_and_q, body) = if is_group {
@@ -6940,10 +7091,7 @@ pub async fn send_seen_v2(
             "group",
             format!("/api/group/seenv2?{}", s.common_params()),
             json!({
-                "msgInfos": json!({
-                    "data": [{ "gmi": last_msg_id, "cmi": last_msg_id }],
-                    "grid": clean,
-                }).to_string(),
+                "msgInfos": json!({ "data": items, "grid": clean }).to_string(),
                 "imei": s.imei,
             }),
         )
@@ -6952,10 +7100,7 @@ pub async fn send_seen_v2(
             "chat",
             format!("/api/message/seenv2?{}", s.common_params()),
             json!({
-                "msgInfos": json!({
-                    "data": [{ "gmi": last_msg_id, "cmi": last_msg_id }],
-                    "senderId": clean,
-                }).to_string(),
+                "msgInfos": json!({ "data": items, "senderId": clean }).to_string(),
                 "imei": s.imei,
             }),
         )
@@ -9018,6 +9163,60 @@ mod rich_card_tests {
         let message = parse_chat_message(&json!({"msgId":"1","uidFrom":"7","ts":1,"msgType":"chat.list","content":list})).unwrap();
         assert_eq!(message.text, "Bài viết");
         assert_eq!(message.link_url.as_deref(), Some("https://example.com/a"));
+        assert_eq!(message.card.unwrap()["parts"][0]["desc"], "Tóm tắt");
+    }
+
+    #[test]
+    fn seen_items_match_zalo_pc_shape() {
+        let raw = json!({"msgId": "7001", "cliMsgId": "1764000000123", "uidFrom": "555", "idTo": "999",
+            "msgType": "webchat", "st": 3, "at": 5, "cmd": 501, "ts": "1764000000200"});
+        let message = ChatMessage {
+            id: "7001".into(),
+            wire_ref: crate::message_model::WireMessageRef::from_raw(&raw),
+            ..Default::default()
+        };
+        let items = seen_items(&[&message], "555", false, "999");
+        assert_eq!(items[0], json!({"cmi": "1764000000123", "gmi": "7001", "si": "555", "di": "999",
+            "mt": "webchat", "st": 3, "at": 5, "cmd": 501, "ts": "1764000000200"}));
+
+        let group_raw = json!({"msgId": "8", "cliMsgId": "9", "uidFrom": "555", "idTo": "g321", "msgType": "chat.photo"});
+        let group_message = ChatMessage { id: "8".into(), ts: 42,
+            wire_ref: crate::message_model::WireMessageRef::from_raw(&group_raw), ..Default::default() };
+        let group = seen_items(&[&group_message], "g321", true, "999");
+        assert_eq!(group[0]["di"], "321");
+        assert_eq!(group[0]["st"], -1);
+        assert_eq!(group[0]["ts"], "42");
+
+        let bare = ChatMessage { id: "5".into(), ..Default::default() };
+        let one = seen_items(&[&bare], "u555", false, "999");
+        assert_eq!((one[0]["cmi"].as_str(), one[0]["si"].as_str(), one[0]["di"].as_str()), (Some("5"), Some("555"), Some("999")));
+    }
+
+    #[test]
+    fn zalo_notice_cards_keep_every_part() {
+        // Shapes from Zalo PC's OA renderer (re-notes/82_zalo_notice_cards.md).
+        let list = json!([
+            {"type":"l.a.header.full","title":"Mừng ngày Văn hóa Việt Nam","description":"Cùng Zalo lan tỏa","thumb":"https://s.zalo.example/h.jpg","href":"https://zalo.example/a","action":""},
+            {"type":"l.a.child.full","title":"Bài thứ hai","thumb":"https://s.zalo.example/c.jpg","href":"https://zalo.example/b","action":"action.open.inapp"}
+        ]);
+        let message = parse_chat_message(&json!({"msgId":"1","uidFrom":"7","ts":1,"msgType":"chat.list.action","content":list})).unwrap();
+        assert_eq!(message.text, "Mừng ngày Văn hóa Việt Nam");
+        let card = message.card.unwrap();
+        assert_eq!(card["kind"], "board");
+        assert_eq!(card["parts"].as_array().unwrap().len(), 2);
+        assert_eq!(card["parts"][0]["header"], true);
+        assert_eq!(card["parts"][1]["header"], false);
+        assert!(message.link_src.is_none());
+
+        let ecard = json!({"title":"✨ Mừng ngày Văn hóa Việt Nam","description":"Gửi lời chúc","thumb":"https://s.zalo.example/e.jpg",
+            "href":"","action":"","childnumber":0,"type":"","params":"{\"actions\":[]}"});
+        let message = parse_chat_message(&json!({"msgId":"2","uidFrom":"7","ts":1,"msgType":"chat.ecard","content":ecard})).unwrap();
+        assert_eq!(message.text, "✨ Mừng ngày Văn hóa Việt Nam");
+        let card = message.card.unwrap();
+        assert_eq!(card["parts"][0]["desc"], "Gửi lời chúc");
+        assert_eq!(card["parts"][0]["thumb"], "https://s.zalo.example/e.jpg");
+        assert!(card["parts"][0]["url"].is_null());
+        assert!(message.link_src.is_none());
     }
 }
 
