@@ -35,7 +35,7 @@ struct RootView: View {
         if store.session.loggedIn || store.switchingTo != nil { ChatBackgroundView(thread: store.selectedThread) } else { WorkspaceBackdrop() }
     }
 
-    var body: some View {
+    private var workspaceSurface: some View {
         rootContent
         // The wallpaper stays when no conversation is open, e.g. right after launch.
         .background { rootBackground }
@@ -63,6 +63,10 @@ struct RootView: View {
                 .overlay(alignment: .top) { Divider() }
             }
         }
+    }
+
+    private var workspaceDialogs: some View {
+        workspaceSurface
         .confirmationDialog("Đăng xuất tài khoản?", isPresented: $store.showingLogoutConfirmation, titleVisibility: .visible) {
             Button("Đăng xuất", role: .destructive) { store.send("logout") }
             Button("Hủy", role: .cancel) {}
@@ -92,6 +96,10 @@ struct RootView: View {
             Button("Hủy", role: .cancel) { store.blockCandidate = nil }
             Button("Chặn", role: .destructive) { store.confirmBlock() }
         } message: { Text("Người bị chặn không thể nhắn tin hoặc gọi cho bạn. Thao tác được gửi tới Zalo; bạn có thể bỏ chặn trong Danh bạ > Danh sách chặn.") }
+    }
+
+    var body: some View {
+        workspaceDialogs
         .overlay(alignment: .bottomLeading) { StatusPill().padding(18) }
         .onReceive(NotificationCenter.default.publisher(for: .snapshotOpenSearch)) { note in
             if store.demo, let query = note.object as? String { searchOpen = true; globalQuery = query }
