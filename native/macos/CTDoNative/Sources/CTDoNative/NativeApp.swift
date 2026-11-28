@@ -133,6 +133,8 @@ extension CTDoNativeApp {
 @MainActor
 final class NativeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var store: AppStore?
+    // A second terminate request must join the in-flight shutdown instead of replacing its reply.
+    private var terminationRequested = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Demo windows use a throwaway data folder, so they may run beside the signed-in app.
         if !ProcessInfo.processInfo.arguments.contains("--demo"), let identifier=Bundle.main.bundleIdentifier,
@@ -204,13 +206,21 @@ final class NativeAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         if UserDefaults.standard.bool(forKey: "nativeLockOnDeactivate"), store?.session.loggedIn == true { store?.isLocked = true }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let event = NSApp.currentEvent
-        BackgroundMode.note("quit requested event=\(event.map { "\($0.type.rawValue)/\($0.charactersIgnoringModifiers ?? "")" } ?? "none") windows=\(NSApp.windows.filter(\.isVisible).count)")
+        guard !terminationRequested else { return .terminateLater }
+        terminationRequested = true
+        let eventType = sender.currentEvent.map { String($0.type.rawValue) } ?? "none"
+        BackgroundMode.note("quit requested event=\(eventType) windows=\(sender.windows.filter(\.isVisible).count)")
         // A downloaded update the user left for later is installed once this process exits.
         SoftwareUpdater.shared.installStagedOnQuit()
         guard let store else { return .terminateNow }
         store.stop {
-            Task { @MainActor in sender.reply(toApplicationShouldTerminate: true) }
+            // AppKit can run its modal event loop while waiting for the deferred reply.
+            let runLoop = CFRunLoopGetMain()
+            let modes = [RunLoop.Mode.default.rawValue, RunLoop.Mode.modalPanel.rawValue] as CFArray
+            CFRunLoopPerformBlock(runLoop, modes) {
+                MainActor.assumeIsolated { sender.reply(toApplicationShouldTerminate: true) }
+            }
+            CFRunLoopWakeUp(runLoop)
         }
         return .terminateLater
     }

@@ -49,7 +49,7 @@ public final class CoreProcess: @unchecked Sendable {
     private var diagnostics: FileHandle?
     private var decoder = JSONLineDecoder()
     private var stopping = false
-    private var stopCompletion: (@Sendable () -> Void)?
+    private var stopCompletions: [@Sendable () -> Void] = []
     private let onEvent: @Sendable (CoreEvent) -> Void
     private let onFailure: @Sendable (String) -> Void
 
@@ -78,18 +78,20 @@ public final class CoreProcess: @unchecked Sendable {
                 self.diagnostics = stderr.fileHandleForReading
                 self.output?.readabilityHandler = { [weak self] handle in
                     let data = handle.availableData
-                    self?.queue.async { [weak self] in self?.receive(data) }
+                    self?.queue.async { [weak self] in
+                        guard let self, self.output === handle, !self.stopping else { return }
+                        self.receive(data)
+                    }
                 }
                 // Diagnostic text may contain upstream payloads; drain it without displaying or retaining it.
                 self.diagnostics?.readabilityHandler = { handle in _ = handle.availableData }
-                child.terminationHandler = { [weak self] _ in
+                child.terminationHandler = { [weak self] child in
                     self?.queue.async { [weak self] in
-                        guard let self else { return }
-                        self.closePipes()
-                        self.process = nil
-                        if !self.stopping { self.onFailure(BridgeFailure.disconnected.localizedDescription) }
-                        self.stopCompletion?()
-                        self.stopCompletion = nil
+                        // A forced stop can finish before the old Process callback arrives.
+                        guard let self, self.process === child else { return }
+                        let wasStopping = self.stopping
+                        self.finishStop()
+                        if !wasStopping { self.onFailure(BridgeFailure.disconnected.localizedDescription) }
                     }
                 }
                 self.process = child
@@ -123,24 +125,40 @@ public final class CoreProcess: @unchecked Sendable {
         }
     }
 
+    /// Stops the child and calls each pending completion on the bridge queue.
     public func stop(completion: @escaping @Sendable () -> Void = {}) {
         queue.async { [self] in
-            guard let child = self.process, child.isRunning else {
-                closePipes(); process = nil; completion(); return
+            stopCompletions.append(completion)
+            guard stopCompletions.count == 1 else { return }
+            stopping = true
+            guard let child = process, child.isRunning else {
+                finishStop()
+                return
             }
-            self.stopCompletion = completion
-            self.stopping = true
             // Closing stdin is an ownership signal, including while authentication is in progress.
-            try? self.input?.close()
-            self.input = nil
-            self.queue.asyncAfter(deadline: .now() + 1) { [self, child] in
-                if child.isRunning { child.terminate() }
-                self.closePipes()
+            try? input?.close()
+            input = nil
+            queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard self?.process === child, child.isRunning else { return }
+                child.terminate()
             }
-            self.queue.asyncAfter(deadline: .now() + 2) { [child] in
+            // The store drops the bridge after requesting shutdown. Retain it through the deadline
+            // so a missed termination callback cannot leave AppKit waiting for its reply.
+            queue.asyncAfter(deadline: .now() + 2) { [self] in
+                guard process === child else { return }
                 if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+                finishStop()
             }
         }
+    }
+
+    private func finishStop() {
+        closePipes()
+        process = nil
+        stopping = false
+        let completions = stopCompletions
+        stopCompletions.removeAll()
+        completions.forEach { $0() }
     }
 
     private func receive(_ data: Data) {
