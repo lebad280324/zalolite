@@ -1,30 +1,41 @@
 import AppKit
+import ImageIO
 import SwiftUI
 import NativeBridge
 
 // MARK: - Animated images (stickers)
 
-/// Shared decoded images; animated WebP and GIF keep every frame inside the `NSImage`.
+/// Sprite strips and animations can be large even when their compressed payload is small.
 @MainActor
 enum AnimatedImageCache {
-    private static let cache: NSCache<NSURL, NSImage> = {
-        let cache = NSCache<NSURL, NSImage>(); cache.countLimit = 300; return cache
-    }()
+    private static let cache = ImageMemoryCache<URL>(byteLimit: 24 * 1024 * 1024, countLimit: 160)
     private static var loading: [URL: Task<NSImage?, Never>] = [:]
 
     static func image(for url: URL) async -> NSImage? {
-        if let hit = cache.object(forKey: url as NSURL) { return hit }
+        if let hit = cache.image(for: url) { return hit }
         if let task = loading[url] { return await task.value }
-        let task = Task.detached(priority: .utility) { () -> NSImage? in
-            guard let (data, response) = try? await URLSession.shared.data(from: url),
-                  (response as? HTTPURLResponse)?.statusCode ?? 200 < 400, data.count < 40_000_000 else { return nil }
-            return NSImage(data: data)
+        let task = Task { @MainActor () -> NSImage? in
+            defer { loading[url] = nil }
+            let result = await Task.detached(priority: .utility) { () -> (NSImage, Int?)? in
+                guard let data = try? await ImageTransfer.fetch(url, limit: 40_000_000),
+                      let image = NSImage(data: data) else { return nil }
+                return (image, estimatedBytes(of: data))
+            }.value
+            guard let (image, cost) = result else { return nil }
+            if let cost { cache.insert(image, for: url, bytes: cost) }
+            return image
         }
         loading[url] = task
-        let image = await task.value
-        loading[url] = nil
-        if let image { cache.setObject(image, forKey: url as NSURL) }
-        return image
+        return await task.value
+    }
+
+    nonisolated static func estimatedBytes(of data: Data) -> Int? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        let frameBytes = Double(width) * Double(height) * 4
+        return Int(exactly: frameBytes * Double(CGImageSourceGetCount(source)) + Double(data.count))
     }
 }
 
@@ -46,14 +57,27 @@ struct AnimatedRemoteImage: NSViewRepresentable {
         if context.coordinator.url != url { load(into: view, coordinator: context.coordinator) }
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
-    final class Coordinator { var url: URL? }
+    final class Coordinator {
+        var url: URL?
+        var loadTask: Task<Void, Never>?
+    }
+
+    static func dismantleNSView(_ view: NSImageView, coordinator: Coordinator) {
+        coordinator.loadTask?.cancel()
+        coordinator.loadTask = nil
+        view.image = nil
+    }
+
     private func load(into view: NSImageView, coordinator: Coordinator) {
+        coordinator.loadTask?.cancel()
         coordinator.url = url
+        view.image = nil
         let target = url
-        Task { @MainActor in
+        coordinator.loadTask = Task { @MainActor [weak view, weak coordinator] in
             let image = await AnimatedImageCache.image(for: target)
-            guard coordinator.url == target else { return }
-            view.image = image
+            guard !Task.isCancelled, let coordinator, coordinator.url == target else { return }
+            view?.image = image
+            coordinator.loadTask = nil
         }
     }
 }

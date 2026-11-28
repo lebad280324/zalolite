@@ -72,4 +72,32 @@ final class NativeBridgeTests: XCTestCase {
         core.stop { stopped.fulfill() }
         wait(for: [stopped], timeout: 4)
     }
+
+    func testOverlappingStopsCompleteAfterOwnerReleasesCoreProcess() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ctdo-bridge-stop-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("stubborn-core")
+        let script = """
+        #!/bin/sh
+        trap '' TERM
+        printf '%s\\n' '{"event":"ready"}'
+        exec /bin/sleep 6
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+        let ready = expectation(description: "child ready")
+        let firstStopped = expectation(description: "first stop request")
+        let secondStopped = expectation(description: "second stop request")
+        var core: CoreProcess? = CoreProcess(onEvent: { event in
+            if event.event == "ready" { ready.fulfill() }
+        }, onFailure: { error in XCTFail(error) })
+        core?.start(coreURL: executable, dataDirectory: directory, demo: true)
+        wait(for: [ready], timeout: 4)
+        core?.stop { firstStopped.fulfill() }
+        core?.stop { secondStopped.fulfill() }
+        core = nil
+        wait(for: [firstStopped, secondStopped], timeout: 4)
+    }
 }
