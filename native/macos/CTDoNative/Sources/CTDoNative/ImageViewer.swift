@@ -61,8 +61,17 @@ struct ImageViewerOverlay: View {
             withAnimation(reducedMotion ? nil : .spring(response: 0.34, dampingFraction: 0.82)) { appeared = true }
             installScrollZoom()
         }
-        .onDisappear { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
-        .task(id: url) { image = await AnimatedImageCache.image(for: url) }
+        .onDisappear { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil; image = nil }
+        .task(id: url) {
+            let source = url
+            // Full-size pixels only belong to the open viewer, so closing it releases them.
+            let loaded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                if source.isFileURL { return NSImage(contentsOf: source) }
+                guard let bytes = try? await ImageTransfer.fetch(source, limit: 40_000_000) else { return nil }
+                return NSImage(data: bytes)
+            }.value
+            if !Task.isCancelled { image = loaded }
+        }
     }
 
     private var controls: some View {

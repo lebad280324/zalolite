@@ -484,9 +484,9 @@ enum RowTone { case primary, secondary, accent, name, white, pill, time }
         guard url != faceURL else { return }
         faceTask?.cancel(); faceURL = url; face = nil
         guard let url else { return }
-        if let ready = PhotoCache.shared.cached(url) { face = ready; return }
+        if let ready = PhotoCache.shared.cached(url, size: .avatar) { face = ready; return }
         faceTask = Task { [weak self] in
-            let image = try? await PhotoCache.shared.image(url)
+            let image = try? await PhotoCache.shared.image(url, size: .avatar)
             guard !Task.isCancelled, let self, self.faceURL == url else { return }
             self.face = image; self.needsDisplay = true
         }

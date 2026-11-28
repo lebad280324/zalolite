@@ -57,7 +57,7 @@ private final class TranscriptFrameProbe: NSObject {
             }
             // Rasterise once so drawing cost matches a decoded bitmap.
             if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let cg = rep.cgImage {
-                seedPhotoCacheForDiagnostics(URL(string: "https://probe.invalid/photo-\(n).jpg")!, NSImage(cgImage: cg, size: size))
+                PhotoCache.shared.seedForDiagnostics(URL(string: "https://probe.invalid/photo-\(n).jpg")!, NSImage(cgImage: cg, size: size))
             }
         }
         var seed: UInt64 = 0x9E3779B97F4A7C15
